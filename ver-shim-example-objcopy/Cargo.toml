@@ -1,0 +1,10 @@
+[package]
+name = "ver-shim-example-objcopy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ver-shim = { path = "../ver-shim" }
+
+[build-dependencies]
+ver-shim-build = { path = "../ver-shim-build" }

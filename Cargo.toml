@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+    "ver-shim",
+    "ver-shim-build",
+]
+exclude = [
+    "ver-shim-example",
+    "ver-shim-example-build",
+    "ver-shim-example-objcopy",
+]

@@ -1,0 +1,8 @@
+[package]
+name = "ver-shim"
+version = "0.1.0"
+edition = "2024"
+description = "Runtime access to version data injected via link section"
+links = ".ver_shim_data"
+
+[lib]
