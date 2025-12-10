@@ -5,6 +5,6 @@ edition = "2024"
 description = "Build script helper for injecting version data into binaries"
 
 [dependencies]
-ver-shim = { path = "../ver-shim" }
+ver-shim = { path = "../ver-shim", version = "0.1" }
 heck = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["std", "now"] }
