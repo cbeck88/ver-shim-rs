@@ -7,9 +7,9 @@ use std::process::Command;
 
 use ver_shim::{BUFFER_SIZE, SECTION_NAME};
 
+use crate::LinkSection;
 use crate::cargo_helpers::{self, cargo_rerun_if, cargo_warning};
 use crate::rustc;
-use crate::LinkSection;
 
 /// Builder for updating sections in a binary.
 ///
