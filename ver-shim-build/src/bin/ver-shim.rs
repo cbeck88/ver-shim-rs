@@ -121,7 +121,8 @@ fn build_section(args: &Args) -> LinkSection {
 
 fn main() {
     // Unset OUT_DIR to prevent LinkSection from trying to use build.rs paths
-    std::env::remove_var("OUT_DIR");
+    // SAFETY: We're single-threaded at this point, before any other code runs
+    unsafe { std::env::remove_var("OUT_DIR") };
 
     let args = Args::parse();
 
@@ -143,7 +144,7 @@ fn main() {
                 .unwrap_or_else(|| input.parent().unwrap().to_path_buf());
             section.patch_into(input).write_to(&output_path);
             eprintln!(
-                "ver-shim-gen: patched {} -> {}",
+                "ver-shim: patched {} -> {}",
                 input.display(),
                 output_path.display()
             );
@@ -154,7 +155,7 @@ fn main() {
                 std::process::exit(1);
             };
             let output_path = section.write_to(&output);
-            eprintln!("ver-shim-gen: wrote {}", output_path.display());
+            eprintln!("ver-shim: wrote {}", output_path.display());
         }
     }
 }
