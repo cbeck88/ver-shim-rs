@@ -1,14 +1,16 @@
 //! LLVM tools wrapper for section manipulation.
 
 use std::env::consts::EXE_SUFFIX;
-use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
-use crate::cargo_helpers::cargo_warning;
 use crate::rustc;
 
 /// Wrapper for LLVM tools (llvm-readobj, llvm-objcopy).
+///
+/// This provides access to LLVM tools from the Rust toolchain for reading
+/// and modifying ELF sections in binaries.
 pub struct LlvmTools {
     bin_dir: PathBuf,
 }
@@ -93,46 +95,20 @@ impl LlvmTools {
         None
     }
 
-    /// Updates a section in a binary, or copies the binary if the section doesn't exist.
+    /// Updates a section in a binary using llvm-objcopy.
     ///
-    /// If the section exists, uses llvm-objcopy to update it with the contents of `section_file`.
-    /// If the section doesn't exist, copies the input binary to the output path unchanged
-    /// and emits a warning.
-    ///
-    /// Returns `true` if the section was updated, `false` if the binary was copied.
     /// Panics on errors.
-    pub fn update_section_or_copy(
+    pub fn update_section(
         &self,
         input: impl AsRef<Path>,
         output: impl AsRef<Path>,
         section_name: &str,
         section_file: impl AsRef<Path>,
-    ) -> bool {
+    ) {
         let input = input.as_ref();
         let output = output.as_ref();
         let section_file = section_file.as_ref();
 
-        // Check if the section exists
-        let section_size = self.get_section_size(input, section_name);
-
-        if section_size.is_none() {
-            cargo_warning(&format!(
-                "section '{}' not found in {}, copying without modification",
-                section_name,
-                input.display()
-            ));
-            fs::copy(input, output).unwrap_or_else(|e| {
-                panic!(
-                    "ver-shim-build: failed to copy {} to {}: {}",
-                    input.display(),
-                    output.display(),
-                    e
-                )
-            });
-            return false;
-        }
-
-        // Run objcopy to update the section
         let objcopy_path = self.bin_dir.join(format!("llvm-objcopy{}", EXE_SUFFIX));
         let update_arg = format!("{}={}", section_name, section_file.display());
 
@@ -153,7 +129,55 @@ impl LlvmTools {
         if !status.success() {
             panic!("ver-shim-build: objcopy failed with status {}", status);
         }
+    }
 
-        true
+    /// Updates a section in a binary using llvm-objcopy, reading section data from bytes.
+    ///
+    /// This pipes the bytes directly to objcopy via stdin, avoiding the need for a
+    /// temporary file. Works outside of build.rs context.
+    ///
+    /// Panics on errors.
+    pub fn update_section_with_bytes(
+        &self,
+        input: impl AsRef<Path>,
+        output: impl AsRef<Path>,
+        section_name: &str,
+        bytes: &[u8],
+    ) {
+        let input = input.as_ref();
+        let output = output.as_ref();
+
+        let objcopy_path = self.bin_dir.join(format!("llvm-objcopy{}", EXE_SUFFIX));
+        let update_arg = format!("{}=/dev/stdin", section_name);
+
+        let mut child = Command::new(&objcopy_path)
+            .arg("--update-section")
+            .arg(&update_arg)
+            .arg(input)
+            .arg(output)
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "ver-shim-build: failed to execute objcopy at '{}': {}",
+                    objcopy_path.display(),
+                    e
+                )
+            });
+
+        // Write bytes to stdin and close the pipe
+        let mut stdin = child.stdin.take().expect("failed to open stdin");
+        stdin.write_all(bytes).unwrap_or_else(|e| {
+            panic!("ver-shim-build: failed to write to objcopy stdin: {}", e)
+        });
+        drop(stdin); // Close the pipe
+
+        let status = child.wait().unwrap_or_else(|e| {
+            panic!("ver-shim-build: failed to wait for objcopy: {}", e)
+        });
+
+        if !status.success() {
+            panic!("ver-shim-build: objcopy failed with status {}", status);
+        }
     }
 }

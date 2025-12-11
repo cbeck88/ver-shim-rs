@@ -64,6 +64,7 @@ mod rustc;
 /// Update section command for patching artifact dependency binaries.
 mod update_section;
 
+pub use llvm_tools::LlvmTools;
 pub use update_section::UpdateSectionCommand;
 
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
@@ -218,6 +219,89 @@ impl LinkSection {
             .unwrap_or(BUFFER_SIZE)
     }
 
+    /// Builds the section data as bytes.
+    ///
+    /// This collects all enabled version info and builds the binary section data.
+    /// Does not write to any file.
+    pub fn build_section_bytes(self) -> Vec<u8> {
+        self.check_enabled();
+
+        // Emit rerun-if-changed directives for git state (only if git data requested)
+        if self.any_git_enabled() {
+            emit_git_rerun_if_changed();
+        }
+
+        // Collect the data for each member
+        let mut member_data: [Option<String>; NUM_MEMBERS] = Default::default();
+
+        if self.include_git_sha
+            && let Some(git_sha) = get_git_sha(self.fail_on_error)
+        {
+            eprintln!("ver-shim-build: git SHA = {}", git_sha);
+            member_data[Member::GitSha as usize] = Some(git_sha);
+        }
+
+        if self.include_git_describe
+            && let Some(git_describe) = get_git_describe(self.fail_on_error)
+        {
+            eprintln!("ver-shim-build: git describe = {}", git_describe);
+            member_data[Member::GitDescribe as usize] = Some(git_describe);
+        }
+
+        if self.include_git_branch
+            && let Some(git_branch) = get_git_branch(self.fail_on_error)
+        {
+            eprintln!("ver-shim-build: git branch = {}", git_branch);
+            member_data[Member::GitBranch as usize] = Some(git_branch);
+        }
+
+        if (self.include_git_commit_timestamp || self.include_git_commit_date)
+            && let Some(timestamp) = get_git_commit_timestamp(self.fail_on_error)
+        {
+            if self.include_git_commit_timestamp {
+                let rfc3339 = timestamp.to_rfc3339();
+                eprintln!("ver-shim-build: git commit timestamp = {}", rfc3339);
+                member_data[Member::GitCommitTimestamp as usize] = Some(rfc3339);
+            }
+            if self.include_git_commit_date {
+                let date = timestamp.date_naive().to_string();
+                eprintln!("ver-shim-build: git commit date = {}", date);
+                member_data[Member::GitCommitDate as usize] = Some(date);
+            }
+        }
+
+        if self.include_git_commit_msg
+            && let Some(msg) = get_git_commit_msg(self.fail_on_error)
+        {
+            eprintln!("ver-shim-build: git commit msg = {}", msg);
+            member_data[Member::GitCommitMsg as usize] = Some(msg);
+        }
+
+        if self.any_build_time_enabled() {
+            // Emit rerun-if-env-changed for reproducible build time override
+            cargo_rerun_if("env-changed=VER_SHIM_BUILD_TIME");
+            let build_time = get_build_time();
+            if self.include_build_timestamp {
+                let rfc3339 = build_time.to_rfc3339();
+                eprintln!("ver-shim-build: build timestamp = {}", rfc3339);
+                member_data[Member::BuildTimestamp as usize] = Some(rfc3339);
+            }
+            if self.include_build_date {
+                let date = build_time.date_naive().to_string();
+                eprintln!("ver-shim-build: build date = {}", date);
+                member_data[Member::BuildDate as usize] = Some(date);
+            }
+        }
+
+        if let Some(ref custom) = self.custom {
+            eprintln!("ver-shim-build: custom = {}", custom);
+            member_data[Member::Custom as usize] = Some(custom.clone());
+        }
+
+        // Build the section buffer
+        let buffer_size = self.effective_buffer_size();
+        build_section_buffer(&member_data, buffer_size)
+    }
     /// Writes the section data file to the specified path.
     ///
     /// If the path is a directory, writes to `{path}/ver_shim_data`.
@@ -315,84 +399,8 @@ impl LinkSection {
         }
     }
 
-    pub(crate) fn write_section_to_path(&self, path: &Path) -> PathBuf {
-        self.check_enabled();
-
-        // Emit rerun-if-changed directives for git state (only if git data requested)
-        if self.any_git_enabled() {
-            emit_git_rerun_if_changed();
-        }
-
-        // Collect the data for each member
-        let mut member_data: [Option<String>; NUM_MEMBERS] = Default::default();
-
-        if self.include_git_sha
-            && let Some(git_sha) = get_git_sha(self.fail_on_error)
-        {
-            eprintln!("ver-shim-build: git SHA = {}", git_sha);
-            member_data[Member::GitSha as usize] = Some(git_sha);
-        }
-
-        if self.include_git_describe
-            && let Some(git_describe) = get_git_describe(self.fail_on_error)
-        {
-            eprintln!("ver-shim-build: git describe = {}", git_describe);
-            member_data[Member::GitDescribe as usize] = Some(git_describe);
-        }
-
-        if self.include_git_branch
-            && let Some(git_branch) = get_git_branch(self.fail_on_error)
-        {
-            eprintln!("ver-shim-build: git branch = {}", git_branch);
-            member_data[Member::GitBranch as usize] = Some(git_branch);
-        }
-
-        if (self.include_git_commit_timestamp || self.include_git_commit_date)
-            && let Some(timestamp) = get_git_commit_timestamp(self.fail_on_error)
-        {
-            if self.include_git_commit_timestamp {
-                let rfc3339 = timestamp.to_rfc3339();
-                eprintln!("ver-shim-build: git commit timestamp = {}", rfc3339);
-                member_data[Member::GitCommitTimestamp as usize] = Some(rfc3339);
-            }
-            if self.include_git_commit_date {
-                let date = timestamp.date_naive().to_string();
-                eprintln!("ver-shim-build: git commit date = {}", date);
-                member_data[Member::GitCommitDate as usize] = Some(date);
-            }
-        }
-
-        if self.include_git_commit_msg
-            && let Some(msg) = get_git_commit_msg(self.fail_on_error)
-        {
-            eprintln!("ver-shim-build: git commit msg = {}", msg);
-            member_data[Member::GitCommitMsg as usize] = Some(msg);
-        }
-
-        if self.any_build_time_enabled() {
-            // Emit rerun-if-env-changed for reproducible build time override
-            cargo_rerun_if("env-changed=VER_SHIM_BUILD_TIME");
-            let build_time = get_build_time();
-            if self.include_build_timestamp {
-                let rfc3339 = build_time.to_rfc3339();
-                eprintln!("ver-shim-build: build timestamp = {}", rfc3339);
-                member_data[Member::BuildTimestamp as usize] = Some(rfc3339);
-            }
-            if self.include_build_date {
-                let date = build_time.date_naive().to_string();
-                eprintln!("ver-shim-build: build date = {}", date);
-                member_data[Member::BuildDate as usize] = Some(date);
-            }
-        }
-
-        if let Some(ref custom) = self.custom {
-            eprintln!("ver-shim-build: custom = {}", custom);
-            member_data[Member::Custom as usize] = Some(custom.clone());
-        }
-
-        // Build the section buffer
-        let buffer_size = self.effective_buffer_size();
-        let buffer = build_section_buffer(&member_data, buffer_size);
+    pub(crate) fn write_section_to_path(self, path: &Path) -> PathBuf {
+        let buffer = self.build_section_bytes();
 
         // Write to file - if path is a directory, append ver_shim_data
         let output_path = if path.is_dir() {

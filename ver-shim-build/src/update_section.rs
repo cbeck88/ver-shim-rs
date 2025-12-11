@@ -1,8 +1,9 @@
 //! Update section command for patching artifact dependency binaries.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
-use ver_shim::{BUFFER_SIZE, SECTION_NAME};
+use ver_shim::SECTION_NAME;
 
 use crate::LinkSection;
 use crate::cargo_helpers::{self, cargo_rerun_if, cargo_warning};
@@ -44,9 +45,6 @@ impl UpdateSectionCommand {
     /// If the section doesn't exist in the input binary, a warning is logged and the
     /// binary is copied without modification.
     pub fn write_to(self, path: impl AsRef<Path>) {
-        let out_dir = cargo_helpers::out_dir();
-        let section_file = self.link_section.write_section_to_path(&out_dir);
-
         eprintln!("ver-shim-build: input binary = {}", self.bin_path.display());
 
         // Emit rerun-if-changed for the input binary
@@ -85,24 +83,43 @@ impl UpdateSectionCommand {
             )
         });
 
-        // Check section size before updating
-        if let Some(size) = llvm.get_section_size(&self.bin_path, SECTION_NAME) {
-            if size != BUFFER_SIZE {
-                cargo_warning(&format!(
-                    "section '{}' has size {} but expected {}, \
-                     binary may have been built with different ver-shim version",
-                    SECTION_NAME, size, BUFFER_SIZE
-                ));
-            }
-        }
+        // Get section size from the binary
+        match llvm.get_section_size(&self.bin_path, SECTION_NAME) {
+            Some(size) => {
+                // Build section data with the correct buffer size from the binary
+                let section_bytes = self
+                    .link_section
+                    .with_buffer_size(size)
+                    .build_section_bytes();
 
-        if llvm.update_section_or_copy(&self.bin_path, &output_path, SECTION_NAME, &section_file) {
-            eprintln!(
-                "ver-shim-build: wrote patched binary to {}",
-                output_path.display()
-            );
-        } else {
-            eprintln!("ver-shim-build: copied to {}", output_path.display());
+                llvm.update_section_with_bytes(
+                    &self.bin_path,
+                    &output_path,
+                    SECTION_NAME,
+                    &section_bytes,
+                );
+                eprintln!(
+                    "ver-shim-build: wrote patched binary to {}",
+                    output_path.display()
+                );
+            }
+            None => {
+                // Section doesn't exist, copy binary without modification
+                cargo_warning(&format!(
+                    "section '{}' not found in {}, copying without modification",
+                    SECTION_NAME,
+                    self.bin_path.display()
+                ));
+                fs::copy(&self.bin_path, &output_path).unwrap_or_else(|e| {
+                    panic!(
+                        "ver-shim-build: failed to copy {} to {}: {}",
+                        self.bin_path.display(),
+                        output_path.display(),
+                        e
+                    )
+                });
+                eprintln!("ver-shim-build: copied to {}", output_path.display());
+            }
         }
     }
 
