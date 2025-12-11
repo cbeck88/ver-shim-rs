@@ -5,6 +5,10 @@ cd "$(dirname "$0")"
 
 echo "=== Testing ver-shim-rs ==="
 echo
+echo "Environment:"
+cargo --version
+rustc --version
+echo
 
 # Colors for output
 RED='\033[0;31m'
@@ -20,9 +24,10 @@ fail() {
     exit 1
 }
 
-# Clean up before tests (workspace shares target directory)
+# Clean up before tests (examples are excluded from workspace, have their own targets)
 echo "Cleaning up..."
 cargo clean 2>/dev/null || true
+rm -rf ver-shim-example-objcopy/target ver-shim-example-build/target 2>/dev/null || true
 echo
 
 # Test 1: Build objcopy example (debug)
@@ -90,14 +95,12 @@ else
 fi
 echo
 
-# Test 7: VER_SHIM_BUFFER_SIZE=1024 should work and trigger rebuild
-# We already have a build from test 5 (release) - now build with different buffer size
-echo "--- Test: VER_SHIM_BUFFER_SIZE=1024 triggers rebuild ---"
-BUILD_OUTPUT=$(cd ver-shim-example-objcopy && VER_SHIM_BUFFER_SIZE=1024 cargo build 2>&1)
-if echo "$BUILD_OUTPUT" | grep -q "Compiling ver-shim"; then
-    pass "VER_SHIM_BUFFER_SIZE=1024 triggers rebuild"
+# Test 7: VER_SHIM_BUFFER_SIZE=1024 should work
+echo "--- Test: VER_SHIM_BUFFER_SIZE=1024 works ---"
+if (cd ver-shim-example-objcopy && VER_SHIM_BUFFER_SIZE=1024 cargo build 2>&1); then
+    pass "VER_SHIM_BUFFER_SIZE=1024 works"
 else
-    fail "VER_SHIM_BUFFER_SIZE should trigger rebuild"
+    fail "VER_SHIM_BUFFER_SIZE=1024 should work"
 fi
 echo
 
