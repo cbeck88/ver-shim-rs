@@ -1,8 +1,15 @@
 [package]
 name = "ver-shim"
 version = "0.1.0"
-edition = "2024"
 description = "Runtime access to version data injected via link section"
+readme = "README.md"
 links = ".ver_shim_data"
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
 
 [lib]

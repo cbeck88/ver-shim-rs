@@ -9,3 +9,17 @@ exclude = [
     "ver-shim-example-build",
     "ver-shim-example-objcopy",
 ]
+
+[workspace.package]
+authors = ["Chris Beck <beck.ct@gmail.com>"]
+repository = "https://github.com/cbeck88/ver-shim-rs"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+keywords = ["version", "git", "build", "linker", "no_std"]
+categories = ["development-tools::build-utils"]
+include = [
+    "src/**/*",
+    "build.rs",
+    "Cargo.toml",
+    "README.md",
+]

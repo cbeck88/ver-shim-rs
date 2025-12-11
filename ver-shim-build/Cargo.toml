@@ -1,8 +1,15 @@
 [package]
 name = "ver-shim-build"
 version = "0.1.0"
-edition = "2024"
 description = "Build script helper for injecting version data into binaries"
+readme = "README.md"
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
 
 [dependencies]
 ver-shim = { path = "../ver-shim", version = "0.1" }
