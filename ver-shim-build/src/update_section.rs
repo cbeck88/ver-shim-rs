@@ -1,13 +1,14 @@
 //! Update section command for patching artifact dependency binaries.
 
+use std::env::consts::EXE_SUFFIX;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use ver_shim::SECTION_NAME;
+use ver_shim::{BUFFER_SIZE, SECTION_NAME};
 
-use crate::cargo_helpers::{self, cargo_directive};
-use crate::find_objcopy;
+use crate::cargo_helpers::{self, cargo_rerun_if, cargo_warning};
+use crate::rustc;
 use crate::LinkSection;
 
 /// Builder for updating sections in an artifact dependency binary.
@@ -32,7 +33,8 @@ impl UpdateSectionCommand {
 
     /// Writes the patched binary to the specified directory.
     ///
-    /// The binary is first written to `OUT_DIR`, then copied to the specified directory.
+    /// If the section doesn't exist in the input binary, a warning is logged and the
+    /// binary is copied without modification.
     pub fn write_to_dir(self, dir: impl AsRef<Path>) {
         let out_dir = cargo_helpers::out_dir();
         let section_file = self.link_section.write_section_to_dir(&out_dir);
@@ -42,31 +44,30 @@ impl UpdateSectionCommand {
 
         // Emit rerun-if-changed for the artifact binary
         // See: https://doc.rust-lang.org/cargo/reference/build-scripts.html#rerun-if-changed
-        cargo_directive(&format!("cargo::rerun-if-changed={}", bin_path.display()));
+        cargo_rerun_if(&format!("changed={}", bin_path.display()));
 
         // Determine output filename (default to {bin_name}.bin to avoid collisions with cargo)
         let default_name = format!("{}.bin", self.bin_name);
         let output_name = self.new_name.as_deref().unwrap_or(&default_name);
+        let output_path = dir.as_ref().join(output_name);
 
-        // Write patched binary to OUT_DIR first
-        let out_dir_binary = out_dir.join(output_name);
-        run_objcopy(&bin_path, &out_dir_binary, SECTION_NAME, &section_file);
-        eprintln!(
-            "ver-shim-build: wrote version data to {}",
-            out_dir_binary.display()
-        );
-
-        // Copy to the specified directory
-        let target_binary = dir.as_ref().join(output_name);
-        fs::copy(&out_dir_binary, &target_binary).unwrap_or_else(|e| {
-            panic!(
-                "ver-shim-build: failed to copy {} to {}: {}",
-                out_dir_binary.display(),
-                target_binary.display(),
-                e
-            )
-        });
-        eprintln!("ver-shim-build: copied to {}", target_binary.display());
+        if run_objcopy(&bin_path, &output_path, SECTION_NAME, &section_file) {
+            eprintln!(
+                "ver-shim-build: wrote patched binary to {}",
+                output_path.display()
+            );
+        } else {
+            // Section doesn't exist, copy binary without modification
+            fs::copy(&bin_path, &output_path).unwrap_or_else(|e| {
+                panic!(
+                    "ver-shim-build: failed to copy {} to {}: {}",
+                    bin_path.display(),
+                    output_path.display(),
+                    e
+                )
+            });
+            eprintln!("ver-shim-build: copied to {}", output_path.display());
+        }
     }
 
     /// Writes the patched binary to the target profile directory (e.g., `target/debug/`).
@@ -86,14 +87,40 @@ impl UpdateSectionCommand {
 }
 
 /// Runs objcopy to update the section in the binary.
-fn run_objcopy(input: &Path, output: &Path, section_name: &str, section_file: &Path) {
-    let objcopy_path = find_objcopy::find().unwrap_or_else(|e| {
+///
+/// Returns `true` if the section was updated, `false` if the section doesn't exist.
+fn run_objcopy(input: &Path, output: &Path, section_name: &str, section_file: &Path) -> bool {
+    let bin_dir = rustc::llvm_tools_bin_dir().unwrap_or_else(|e| {
         panic!(
-            "ver-shim-build: could not find llvm-objcopy: {}\n\
+            "ver-shim-build: could not find LLVM tools directory: {}\n\
              Please install llvm-tools: rustup component add llvm-tools",
             e
         )
     });
+
+    let readobj_path = bin_dir.join(format!("llvm-readobj{}", EXE_SUFFIX));
+    let objcopy_path = bin_dir.join(format!("llvm-objcopy{}", EXE_SUFFIX));
+
+    // Check if the section exists and get its size
+    match get_section_info(input, section_name, &readobj_path) {
+        None => {
+            cargo_warning(&format!(
+                "section '{}' not found in {}, skipping",
+                section_name,
+                input.display()
+            ));
+            return false;
+        }
+        Some(size) => {
+            if size != BUFFER_SIZE {
+                cargo_warning(&format!(
+                    "section '{}' has size {} but expected {}, \
+                     binary may have been built with different ver-shim version",
+                    section_name, size, BUFFER_SIZE
+                ));
+            }
+        }
+    }
 
     let update_arg = format!("{}={}", section_name, section_file.display());
 
@@ -114,4 +141,69 @@ fn run_objcopy(input: &Path, output: &Path, section_name: &str, section_file: &P
     if !status.success() {
         panic!("ver-shim-build: objcopy failed with status {}", status);
     }
+
+    true
+}
+
+/// Uses llvm-readobj to check if a section exists and get its size.
+///
+/// Returns `Some(size)` if the section exists, `None` if it doesn't.
+fn get_section_info(binary: &Path, section_name: &str, readobj_path: &Path) -> Option<usize> {
+    let output = Command::new(readobj_path)
+        .arg("--sections")
+        .arg(binary)
+        .output()
+        .unwrap_or_else(|e| {
+            panic!(
+                "ver-shim-build: failed to execute llvm-readobj at '{}': {}",
+                readobj_path.display(),
+                e
+            )
+        });
+
+    if !output.status.success() {
+        panic!(
+            "ver-shim-build: llvm-readobj failed with status {}",
+            output.status
+        );
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse llvm-readobj --sections output to find our section
+    // Format is like:
+    //   Section {
+    //     Index: 16
+    //     Name: .ver_shim_data (472)
+    //     Type: SHT_PROGBITS (0x1)
+    //     ...
+    //     Size: 512
+    //     ...
+    //   }
+    let mut in_target_section = false;
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+
+        // Check if we're entering our target section
+        // Format: "Name: .ver_shim_data (472)"
+        if let Some(name_part) = trimmed.strip_prefix("Name:") {
+            // Remove parenthesized suffix and trim: ".ver_shim_data (472)" -> ".ver_shim_data"
+            let name = match name_part.find('(') {
+                Some(idx) => name_part[..idx].trim(),
+                None => name_part.trim(),
+            };
+            in_target_section = name == section_name;
+            continue;
+        }
+
+        // If we're in the target section, look for the Size line
+        if in_target_section
+            && let Some(size_str) = trimmed.strip_prefix("Size:")
+            && let Ok(size) = size_str.trim().parse::<usize>()
+        {
+            return Some(size);
+        }
+    }
+
+    None
 }

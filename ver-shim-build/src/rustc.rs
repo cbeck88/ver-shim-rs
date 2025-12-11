@@ -2,14 +2,16 @@
 // https://github.com/rust-embedded/cargo-binutils/blob/07e280d97afe53c0ed24654eb85b39507ac7d6ab/src/rustc.rs#L15
 
 use std::env;
-use std::env::consts::EXE_SUFFIX;
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Finds the path to llvm-objcopy in the Rust toolchain.
+/// Finds the path to the LLVM tools bin directory in the Rust toolchain.
 ///
-/// The path is: `{sysroot}/lib/rustlib/{host}/bin/llvm-objcopy`
-pub fn find() -> Result<PathBuf, String> {
+/// The path is: `{sysroot}/lib/rustlib/{host}/bin/`
+///
+/// Tools like `llvm-objcopy` and `llvm-readelf` can be found by joining
+/// their name (with platform executable suffix) to this path.
+pub fn llvm_tools_bin_dir() -> Result<PathBuf, String> {
     let sysroot = get_sysroot()?;
     let host = get_host()?;
 
@@ -18,7 +20,6 @@ pub fn find() -> Result<PathBuf, String> {
     path.push("rustlib");
     path.push(host);
     path.push("bin");
-    path.push(format!("llvm-objcopy{}", EXE_SUFFIX));
 
     Ok(path)
 }

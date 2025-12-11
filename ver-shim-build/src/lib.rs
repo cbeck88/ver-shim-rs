@@ -56,8 +56,8 @@
 /// Cargo build script helper functions.
 mod cargo_helpers;
 
-/// Helper to find llvm objcopy, based on code in cargo-binutils.
-mod find_objcopy;
+/// Helper to find LLVM tools, based on code in cargo-binutils.
+mod rustc;
 
 /// Update section command for patching artifact dependency binaries.
 mod update_section;
@@ -70,7 +70,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use ver_shim::{BUFFER_SIZE, HEADER_SIZE, Member, NUM_MEMBERS};
 
-use cargo_helpers::cargo_directive;
+use cargo_helpers::cargo_rerun_if;
 
 /// Builder for configuring which git information to include in version sections.
 ///
@@ -331,7 +331,7 @@ impl LinkSection {
 
         if self.any_build_time_enabled() {
             // Emit rerun-if-env-changed for reproducible build time override
-            cargo_directive("cargo::rerun-if-env-changed=VER_SHIM_BUILD_TIME");
+            cargo_rerun_if("env-changed=VER_SHIM_BUILD_TIME");
             let build_time = get_build_time();
             if self.include_build_timestamp {
                 let rfc3339 = build_time.to_rfc3339();
@@ -428,7 +428,7 @@ fn emit_git_rerun_if_changed() {
     // Always watch .git/HEAD
     let head_path = git_dir.join("HEAD");
     if head_path.exists() {
-        cargo_directive(&format!("cargo::rerun-if-changed={}", head_path.display()));
+        cargo_rerun_if(&format!("changed={}", head_path.display()));
 
         // If HEAD points to a ref, also watch that ref file
         if let Ok(head_contents) = fs::read_to_string(&head_path) {
@@ -436,7 +436,7 @@ fn emit_git_rerun_if_changed() {
             if let Some(ref_path) = head_contents.strip_prefix("ref: ") {
                 let ref_file = git_dir.join(ref_path);
                 if ref_file.exists() {
-                    cargo_directive(&format!("cargo::rerun-if-changed={}", ref_file.display()));
+                    cargo_rerun_if(&format!("changed={}", ref_file.display()));
                 }
             }
         }

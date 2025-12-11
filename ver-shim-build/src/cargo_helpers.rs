@@ -10,10 +10,22 @@ pub fn in_build_script() -> bool {
     std::env::var_os("OUT_DIR").is_some()
 }
 
-/// Print a cargo directive, but only if we're in a build script context.
-pub fn cargo_directive(directive: &str) {
+/// Emit a `cargo::rerun-if-{suffix}` directive if in a build script context.
+///
+/// Example: `cargo_rerun_if("changed=/path/to/file")` emits `cargo::rerun-if-changed=/path/to/file`
+pub fn cargo_rerun_if(suffix: &str) {
     if in_build_script() {
-        println!("{}", directive);
+        println!("cargo::rerun-if-{}", suffix);
+    }
+}
+
+/// Emit a warning. In build script context, emits `cargo::warning=msg`.
+/// Otherwise, prints to stderr with `eprintln!`.
+pub fn cargo_warning(msg: &str) {
+    if in_build_script() {
+        println!("cargo::warning={}", msg);
+    } else {
+        eprintln!("warning: {}", msg);
     }
 }
 
