@@ -11,7 +11,16 @@ keywords.workspace = true
 categories.workspace = true
 include.workspace = true
 
+[[bin]]
+name = "ver-shim-gen"
+required-features = ["cli"]
+
+[features]
+default = []
+cli = ["dep:conf"]
+
 [dependencies]
 ver-shim = { path = "../ver-shim", version = "0.1.1" }
 heck = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["std", "now"] }
+conf = { version = "0.4", optional = true, default-features = false }

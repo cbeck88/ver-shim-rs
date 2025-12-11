@@ -63,6 +63,19 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use ver_shim::{BUFFER_SIZE, HEADER_SIZE, Member, NUM_MEMBERS, SECTION_NAME};
 
+/// Returns true if we're running inside a cargo build script context.
+/// We detect this by checking for the OUT_DIR environment variable.
+fn in_build_script() -> bool {
+    std::env::var_os("OUT_DIR").is_some()
+}
+
+/// Print a cargo directive, but only if we're in a build script context.
+fn cargo_directive(directive: &str) {
+    if in_build_script() {
+        println!("{}", directive);
+    }
+}
+
 /// Builder for configuring which git information to include in version sections.
 ///
 /// Use this to select which git info to collect, then either:
@@ -322,7 +335,7 @@ impl LinkSection {
 
         if self.any_build_time_enabled() {
             // Emit rerun-if-env-changed for reproducible build time override
-            println!("cargo::rerun-if-env-changed=VER_SHIM_BUILD_TIME");
+            cargo_directive("cargo::rerun-if-env-changed=VER_SHIM_BUILD_TIME");
             let build_time = get_build_time();
             if self.include_build_timestamp {
                 let rfc3339 = build_time.to_rfc3339();
@@ -432,7 +445,7 @@ impl UpdateSectionCommand {
 
         // Emit rerun-if-changed for the artifact binary
         // See: https://doc.rust-lang.org/cargo/reference/build-scripts.html#rerun-if-changed
-        println!("cargo::rerun-if-changed={}", bin_path.display());
+        cargo_directive(&format!("cargo::rerun-if-changed={}", bin_path.display()));
 
         // Determine output filename (default to {bin_name}.bin to avoid collisions with cargo)
         let default_name = format!("{}.bin", self.bin_name);
@@ -545,7 +558,7 @@ fn emit_git_rerun_if_changed() {
     // Always watch .git/HEAD
     let head_path = git_dir.join("HEAD");
     if head_path.exists() {
-        println!("cargo::rerun-if-changed={}", head_path.display());
+        cargo_directive(&format!("cargo::rerun-if-changed={}", head_path.display()));
 
         // If HEAD points to a ref, also watch that ref file
         if let Ok(head_contents) = fs::read_to_string(&head_path) {
@@ -553,7 +566,7 @@ fn emit_git_rerun_if_changed() {
             if let Some(ref_path) = head_contents.strip_prefix("ref: ") {
                 let ref_file = git_dir.join(ref_path);
                 if ref_file.exists() {
-                    println!("cargo::rerun-if-changed={}", ref_file.display());
+                    cargo_directive(&format!("cargo::rerun-if-changed={}", ref_file.display()));
                 }
             }
         }
