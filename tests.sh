@@ -30,6 +30,12 @@ cargo clean 2>/dev/null || true
 rm -rf ver-shim-example-objcopy/target ver-shim-example-build/target 2>/dev/null || true
 echo
 
+# Build the ver-shim CLI tool first
+echo "--- Building ver-shim CLI tool ---"
+cargo build -p ver-shim-build --features cli 2>&1
+VER_SHIM="$(pwd)/target/debug/ver-shim"
+echo
+
 # Test 1: Build objcopy example (debug)
 echo "--- Test: Build objcopy example (debug) ---"
 (cd ver-shim-example-objcopy && cargo build 2>&1)
@@ -46,13 +52,11 @@ else
 fi
 echo
 
-# Test 3: Patch binary with objcopy (debug)
-echo "--- Test: Patch binary with objcopy (debug) ---"
-(cd ver-shim-example-objcopy && \
-    cargo objcopy --bin ver-shim-example-objcopy -- \
-    --update-section .ver_shim_data=target/ver_shim_data \
-    target/debug/ver-shim-example-objcopy.bin 2>&1)
-pass "objcopy patching works in debug mode"
+# Test 3: Patch binary with ver-shim patch (debug)
+echo "--- Test: Patch binary with ver-shim patch (debug) ---"
+$VER_SHIM --all-git --all-build-time patch \
+    ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy 2>&1
+pass "ver-shim patch works in debug mode"
 echo
 
 # Test 4: Patched binary should show git info
@@ -70,12 +74,11 @@ else
 fi
 echo
 
-# Test 5: Build objcopy example (release)
-echo "--- Test: Build objcopy example (release) ---"
-(cd ver-shim-example-objcopy && \
-    cargo objcopy --release --bin ver-shim-example-objcopy -- \
-    --update-section .ver_shim_data=target/ver_shim_data \
-    target/release/ver-shim-example-objcopy.bin 2>&1)
+# Test 5: Build and patch objcopy example (release)
+echo "--- Test: Build and patch objcopy example (release) ---"
+(cd ver-shim-example-objcopy && cargo build --release 2>&1)
+$VER_SHIM --all-git --all-build-time patch \
+    ver-shim-example-objcopy/target/release/ver-shim-example-objcopy 2>&1
 OUTPUT=$(./ver-shim-example-objcopy/target/release/ver-shim-example-objcopy.bin 2>&1)
 if echo "$OUTPUT" | grep -q "git sha:" && ! echo "$OUTPUT" | grep -q "git sha:.*not set"; then
     pass "objcopy example works in release mode"
@@ -84,7 +87,24 @@ else
 fi
 echo
 
-# Test 6: Build nightly example (ver-shim-example-build)
+# Test 6: Alternative approach - ver-shim -o + cargo objcopy
+echo "--- Test: Alternative approach (ver-shim -o + cargo objcopy) ---"
+# Generate section data file
+$VER_SHIM --all-git --all-build-time -o ver-shim-example-objcopy/target/ver_shim_data 2>&1
+# Use cargo objcopy to patch
+cargo objcopy --manifest-path ver-shim-example-objcopy/Cargo.toml \
+    --bin ver-shim-example-objcopy -- \
+    --update-section .ver_shim_data=ver-shim-example-objcopy/target/ver_shim_data \
+    ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy-alt.bin 2>&1
+OUTPUT=$(./ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy-alt.bin 2>&1)
+if echo "$OUTPUT" | grep -q "git sha:" && ! echo "$OUTPUT" | grep -q "git sha:.*not set"; then
+    pass "alternative approach (ver-shim -o + cargo objcopy) works"
+else
+    fail "alternative approach should work"
+fi
+echo
+
+# Test 7: Build nightly example (ver-shim-example-build)
 echo "--- Test: Build nightly example (ver-shim-example-build) ---"
 (cd ver-shim-example-build && cargo +nightly build 2>&1)
 OUTPUT=$(./ver-shim-example-build/target/debug/ver-shim-example.bin 2>&1)
@@ -95,7 +115,7 @@ else
 fi
 echo
 
-# Test 7: VER_SHIM_BUFFER_SIZE=1024 should work
+# Test 8: VER_SHIM_BUFFER_SIZE=1024 should work
 echo "--- Test: VER_SHIM_BUFFER_SIZE=1024 works ---"
 if (cd ver-shim-example-objcopy && VER_SHIM_BUFFER_SIZE=1024 cargo build 2>&1); then
     pass "VER_SHIM_BUFFER_SIZE=1024 works"
@@ -137,12 +157,9 @@ echo "--- Building baseline for VER_SHIM_BUILD_TIME tests ---"
 echo
 
 # Test 11: VER_SHIM_BUILD_TIME with unix timestamp
-# Note: We don't use cargo clean here - rerun-if-env-changed should trigger rebuild
 echo "--- Test: VER_SHIM_BUILD_TIME with unix timestamp ---"
-(cd ver-shim-example-objcopy && \
-    VER_SHIM_BUILD_TIME=1700000000 cargo objcopy --bin ver-shim-example-objcopy -- \
-    --update-section .ver_shim_data=target/ver_shim_data \
-    target/debug/ver-shim-example-objcopy.bin 2>&1)
+VER_SHIM_BUILD_TIME=1700000000 $VER_SHIM --all-git --all-build-time patch \
+    ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy 2>&1
 OUTPUT=$(./ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy.bin 2>&1)
 if echo "$OUTPUT" | grep -q "build timestamp: 2023-11-14"; then
     pass "VER_SHIM_BUILD_TIME unix timestamp works (2023-11-14)"
@@ -153,10 +170,8 @@ echo
 
 # Test 12: VER_SHIM_BUILD_TIME with RFC 3339
 echo "--- Test: VER_SHIM_BUILD_TIME with RFC 3339 ---"
-(cd ver-shim-example-objcopy && \
-    VER_SHIM_BUILD_TIME="2024-06-15T12:30:00Z" cargo objcopy --bin ver-shim-example-objcopy -- \
-    --update-section .ver_shim_data=target/ver_shim_data \
-    target/debug/ver-shim-example-objcopy.bin 2>&1)
+VER_SHIM_BUILD_TIME="2024-06-15T12:30:00Z" $VER_SHIM --all-git --all-build-time patch \
+    ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy 2>&1
 OUTPUT=$(./ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy.bin 2>&1)
 if echo "$OUTPUT" | grep -q "build timestamp: 2024-06-15"; then
     pass "VER_SHIM_BUILD_TIME RFC 3339 works (2024-06-15)"
@@ -167,7 +182,8 @@ echo
 
 # Test 13: VER_SHIM_BUILD_TIME with invalid value should fail
 echo "--- Test: VER_SHIM_BUILD_TIME with invalid value fails ---"
-if (cd ver-shim-example-objcopy && VER_SHIM_BUILD_TIME="not-a-timestamp" cargo build 2>&1); then
+if VER_SHIM_BUILD_TIME="not-a-timestamp" $VER_SHIM --all-git --all-build-time patch \
+    ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy 2>&1; then
     fail "VER_SHIM_BUILD_TIME with invalid value should fail"
 else
     pass "VER_SHIM_BUILD_TIME with invalid value correctly fails"

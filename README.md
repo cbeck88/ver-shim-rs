@@ -26,7 +26,7 @@ project goal.
 
 ## How does it work?
 
-`ver-shim` declares a linker section called `.ver_shim_data` with a specific size in bytes.
+The `ver-shim` crate declares a linker section called `.ver_shim_data` with a specific size in bytes.
 This is filled in with requested version data only at the end of the build process, after all the
 time consuming steps are done. If the version data (git, timestamps) changes, the binary doesn't
 have to be recompiled -- this section just needs to be overwritten again.
@@ -54,47 +54,12 @@ This crate doesn't change when the git data changes, so depending on it doesn't 
 
 Then, use the `ver-shim-build` crate to fill in the linker section.
 
-There are basically two recommendable approaches.
+There are three recommended approaches.
 
-### Approach #1: `build.rs` + special build command
+### Approach #1: Artifact dependencies (nightly, cleanest)
 
-In `build.rs` for your binary crate:
-
-```rust
-fn main() {
-    ver_shim_build::LinkSection::new()
-        .with_all_git()
-        .write_to_target_dir();
-}
-```
-
-To build a release artifact:
-
-```sh
-cargo objcopy --release --bin my_bin -- --update-section .ver_shim_data=target/ver_shim_data target/release/my_bin.bin
-```
-
-For ergonomics, put this in:
-
-* A justfile
-* The `[alias]` table of [`.cargo/config.toml`](https://doc.rust-lang.org/cargo/reference/config.html#alias)
-* A pre-existing release script.
-
-This command uses cargo to build `my_bin` normally in release mode, and then use the `objcopy` tool to patch the link section with bytes from `target/ver_shim_data`, and produce the patched output at `target/release/my_bin.bin`.
-
-(If you store the patched output in `target/release`, it's better to use a modified name, such as with `.bin`, because if `target/release/my_bin` changes, that will cause unnecessary cargo rebuilds later. If you store the patched output somewhere else then there's less reason to change the name.)
-
-For this to work, you must:
-
-* `cargo install cargo-binutils`
-* `rustup component add llvm-tools`
-
-This is quite portable in that `cargo-binutils` uses the same llvm tools that `rustc` itself
-was built with.
-
-`cargo objcopy` respects other flags of `cargo build`, like turning features on or off, and `cargo-binutils` is generally well maintained.
-
-### Approach #2: Use a post-build crate and artifact dependencies
+This approach uses cargo's artifact dependencies feature to create a post-build crate that
+patches the binary automatically. It's the cleanest solution but requires nightly.
 
 Create a new crate in the same workspace, with a `build.rs` and an empty `lib.rs`.
 
@@ -107,38 +72,105 @@ my-crate = { path = "../my-crate", artifact = "bin" }
 The `build.rs` should look something like this:
 
 ```rust
-use ver_shim_build::LinkSection;
-
 fn main() {
-    LinkSection::new()
+    ver_shim_build::LinkSection::new()
         .with_all_git()
-        .patch_into("my-crate", "bin_name")
+        .with_all_build_time()
+        .patch_into_bin_dep("my-crate", "bin_name")
+        .with_filename("bin_name.bin")
         .write_to_target_profile_dir();
 }
 ```
 
-When cargo runs this `build.rs`, it runs essentially the same `objcopy` command to patch the linker section,
-and produce another binary, by default `bin_name.bin`, in `target/release` or `target/debug` according to the build profile.
+When cargo runs this `build.rs`, it runs an `objcopy` command to patch the linker section,
+and produces another binary (`bin_name.bin`) in `target/release` or `target/debug` according to the build profile.
 This `build.rs` only runs when its input (the unpatched binary) changes, or when the git information changes.
 
 Artifact dependencies are an unstable feature of cargo, so you will have to use nightly for this approach to work.
 
+**Example:** [`ver-shim-example-build`](./ver-shim-example-build)
+
+```sh
+cargo +nightly build   # builds target/debug/ver-shim-example and auto-patches to target/debug/ver-shim-example.bin
+```
+
+### Approach #2: The `ver-shim` CLI tool (stable, still simple)
+
+Install the `ver-shim` CLI tool:
+
+```sh
+cargo install ver-shim-build --features cli
+rustup component add llvm-tools
+```
+
+Then build your binary normally and patch it afterward:
+
+```sh
+cargo build --release
+ver-shim --all-git --build-timestamp patch target/release/my_bin
+```
+
+This produces a patched binary at `target/release/my_bin.bin`.
+
+You can also specify a custom output path:
+
+```sh
+ver-shim --all-git --build-timestamp patch target/release/my_bin -o dist/my_bin
+```
+
+For ergonomics, put this in:
+
+* A justfile
+* A pre-existing release script.
+
+**Example:** [`ver-shim-example-objcopy`](./ver-shim-example-objcopy)
+
+```sh
+cargo build
+ver-shim --all-git --all-build-time patch target/debug/ver-shim-example-objcopy
+./target/debug/ver-shim-example-objcopy.bin
+```
+
+### Approach #3: Using `cargo objcopy`
+
+If you want more control over the objcopy flags, you can use `cargo objcopy` from `cargo-binutils`:
+
+```sh
+cargo install cargo-binutils
+rustup component add llvm-tools
+```
+
+Generate the section data file, then use `cargo objcopy`:
+
+```sh
+ver-shim --all-git --build-timestamp -o target/ver_shim_data
+cargo objcopy --release --bin my_prog -- --update-section .ver_shim_data=target/ver_shim_data -O dist/my_prog.bin
+```
+
+This is very similar to the `ver-shim patch` approach, but has a few differences:
+
+* You can pass aditional flags to objcopy if you want to, like `--strip-all` or other section update operations,
+  and do it all in one shot.
+* If you are cross-compiling, you don't have to specify the path `target/<triple>/release` because `cargo objcopy`
+  works it out automaticlaly for you, which might be nicer.
+* The section is written before the binary is created, so if you change the section size from the default, you
+  must also set `VER_SHIM_BUFFER_SIZE` env for the `ver-shim -o ...` command.
+  * This is less of a rough-edge than you might think though. If the section file produced
+    by `ver-shim -o ...` is too large, then `llvm-objcopy` will give an error and refuse to update the section.
+    If the section file is too small, it will actually still work fine, you just might get a build error if you actually
+    have too much data to fit in the section file.
+  * By contrast,
+    when `ver-shim patch` is used, it reads the buffer size from the target to be patched first, before objcopy,
+    so it always knows the correct size, and if the section got garbage collected, it does the right thing and
+    doesn't produce an error.
+
 ### Summary
 
-The two approaches are illustrated by examples in this repo.
-
-* [`ver-shim-example-objcopy`](./ver-shim-example-objcopy)
-  * Toolchain: **stable**
-  * Extra crate: **no**
-  * Command: `cargo objcopy --bin ver-shim-example-objcopy -- --update-section .ver_shim_data=target/ver_shim_data  target/debug/ver-shim-example-objcopy.bin`
-* [`ver-shim-example-build`](./ver-shim-example-build)
-  * Toolchain: **nightly**
-  * Extra crate: **yes**
-  * Command: `cargo +nightly build` (auto-patches to `target/debug/ver-shim-example.bin`)
-
-There are other patterns worth mentioning, such as [`cargo xtask`](https://github.com/matklad/cargo-xtask).
-However, that's a generalization of the `cargo objcopy` approach, where instead of using the command from `cargo-binutils`,
-you roll your own cargo command and use it to make cargo do whatever you want.
+| Approach | Toolchain | Extra crate | Command |
+|----------|-----------|-------------|---------|
+| Artifact deps | **nightly** | yes | `cargo +nightly build` |
+| `ver-shim patch` | **stable** | no | `cargo build && ver-shim ... patch target/...` |
+| `cargo objcopy` | **stable** | no | `ver-shim -o ... && cargo objcopy ...` |
 
 ## Reproducible builds
 
@@ -196,11 +228,9 @@ It's possible that the binary ends up with 0 copies of the linker section. This 
 If nothing in the program, after optimizations, references the linker section, it will likely be garbage collected and removed by the linker. This would be fine except
 that the `objcopy --update-section` command will fail if the section doesn't exist when `objcopy` runs.
 
-The simplest fixes for this case are probably:
-
-* Actually use the `ver-shim` data. Add a `--version` flag to your program or something, which can actually be invoked and won't be optimized away.
-* Make your dependency on `ver-shim` optional and don't enable it if you won't actually use it.
-* If you invoke `objcopy` from a `build.rs`, then before you do, check if the section actually exists, and skip the `--update-section` if it doesn't.
+The `ver-shim-build` crate automatically detects this and does the right thing, so you won't notice this with the first two methods.
+If you are using `cargo objcopy`, however, `objcopy` will fail with an error if this happens. The simplest fix is to actually invoke a `ver-shim` function somewhere
+in `main.rs`.
 
 ### will you support all the data that `vergen` does?
 
@@ -223,12 +253,12 @@ Most likely not.
 
   which can be read easily using `readelf -n` and `readelf -p .comment`.
 
-* My main motivation was to avoid the hit to build times that occurs when data that "logically" isn't already a part of the code,
+* My main motivation was to avoid the hit to build times that occurs when data that "logically" isn't already a dependency of the code,
   like git state, build timestamp, is injected into the code, and `cargo` rebuilds everything out of an abundance of caution.
 
   If your compiler changes, or your opt level changes, or your cargo features change, cargo already has to rebuild, whether or
   not you additionally inject this stuff as text strings into the source. So there's no advantage to the link-section approach
-  over what `vergen` is doing. You might as well use `vergen` for the other stuff.
+  over what `vergen` is doing with `env!`. You might as well use `vergen` for the other types of data.
 
 ## Licensing and distribution
 
