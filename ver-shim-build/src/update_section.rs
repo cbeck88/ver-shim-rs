@@ -202,8 +202,14 @@ fn get_section_info(binary: &Path, section_name: &str, readobj_path: &Path) -> O
         // If we're in the target section, look for the Size line
         if in_target_section
             && let Some(size_str) = trimmed.strip_prefix("Size:")
-            && let Ok(size) = size_str.trim().parse::<usize>()
         {
+            let size = size_str.trim().parse::<usize>().unwrap_or_else(|e| {
+                panic!(
+                    "ver-shim-build: failed to parse section size '{}': {}",
+                    size_str.trim(),
+                    e
+                )
+            });
             return Some(size);
         }
     }

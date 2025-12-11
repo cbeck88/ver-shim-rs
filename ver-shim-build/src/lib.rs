@@ -69,7 +69,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use ver_shim::{BUFFER_SIZE, HEADER_SIZE, Member, NUM_MEMBERS};
 
-use cargo_helpers::cargo_rerun_if;
+use cargo_helpers::{cargo_rerun_if, cargo_warning};
 
 /// Builder for configuring which git information to include in version sections.
 ///
@@ -504,7 +504,7 @@ fn get_git_commit_timestamp(fail_on_error: bool) -> Option<DateTime<FixedOffset>
             if fail_on_error {
                 panic!("{}", msg);
             } else {
-                println!("cargo:warning={}", msg);
+                cargo_warning(&msg);
                 None
             }
         }
@@ -581,7 +581,7 @@ fn run_git_command(args: &[&str], fail_on_error: bool) -> Option<String> {
             if fail_on_error {
                 panic!("{}", msg);
             } else {
-                println!("cargo:warning={}", msg);
+                cargo_warning(&msg);
                 return None;
             }
         }
@@ -598,7 +598,7 @@ fn run_git_command(args: &[&str], fail_on_error: bool) -> Option<String> {
         if fail_on_error {
             panic!("{}", msg);
         } else {
-            println!("cargo:warning={}", msg);
+            cargo_warning(&msg);
             return None;
         }
     }
@@ -610,7 +610,7 @@ fn run_git_command(args: &[&str], fail_on_error: bool) -> Option<String> {
             if fail_on_error {
                 panic!("{}", msg);
             } else {
-                println!("cargo:warning={}", msg);
+                cargo_warning(&msg);
                 None
             }
         }
