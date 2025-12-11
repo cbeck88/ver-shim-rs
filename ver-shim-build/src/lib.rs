@@ -42,7 +42,7 @@
 //!     LinkSection::new()
 //!         .with_all_git()
 //!         .patch_into_bin_dep("my-dep", "my-bin")
-//!         .with_new_name("my-custom-name")
+//!         .with_filename("my-custom-name")
 //!         .write_to_target_profile_dir();
 //!
 //!     // Or just write the section data file (for use with cargo-objcopy)

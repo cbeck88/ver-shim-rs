@@ -31,7 +31,7 @@ impl UpdateSectionCommand {
     /// If `write_to()` is called with a file path (not a directory), this will panic.
     ///
     /// If not called, the default name is `{original_name}.bin`.
-    pub fn with_new_name(mut self, name: &str) -> Self {
+    pub fn with_filename(mut self, name: &str) -> Self {
         self.new_name = Some(name.to_string());
         self
     }
@@ -39,10 +39,10 @@ impl UpdateSectionCommand {
     /// Writes the patched binary to the specified path.
     ///
     /// If the path is a directory, the output filename will be determined by
-    /// `with_new_name()` if set, otherwise defaults to `{original_name}.bin`.
+    /// `with_filename()` if set, otherwise defaults to `{original_name}.bin`.
     ///
     /// If the path is not a directory, writes directly to that path. In this case,
-    /// `with_new_name()` must not have been called (will panic if it was).
+    /// `with_filename()` must not have been called (will panic if it was).
     ///
     /// If the section doesn't exist in the input binary, a warning is logged and the
     /// binary is copied without modification.
@@ -69,10 +69,10 @@ impl UpdateSectionCommand {
             let output_name = self.new_name.as_deref().unwrap_or(&default_name);
             path.join(output_name)
         } else {
-            // File path: write directly, but panic if with_new_name was used
+            // File path: write directly, but panic if with_filename was used
             if self.new_name.is_some() {
                 panic!(
-                    "ver-shim-build: with_new_name() cannot be used when write_to() \
+                    "ver-shim-build: with_filename() cannot be used when write_to() \
                      is called with a file path (not a directory): {}",
                     path.display()
                 );
