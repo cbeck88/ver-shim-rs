@@ -93,14 +93,15 @@ impl LlvmTools {
 
     /// Updates a section in a binary using llvm-objcopy.
     ///
-    /// Panics on errors.
+    /// Returns `Ok(())` on success, or `Err` if there was an error executing
+    /// llvm-objcopy or if it exited with a non-zero status.
     pub fn update_section(
         &self,
         input: impl AsRef<Path>,
         output: impl AsRef<Path>,
         section_name: &str,
         section_file: impl AsRef<Path>,
-    ) {
+    ) -> io::Result<()> {
         let input = input.as_ref();
         let output = output.as_ref();
         let section_file = section_file.as_ref();
@@ -113,18 +114,16 @@ impl LlvmTools {
             .arg(&update_arg)
             .arg(input)
             .arg(output)
-            .status()
-            .unwrap_or_else(|e| {
-                panic!(
-                    "ver-shim-build: failed to execute objcopy at '{}': {}",
-                    objcopy_path.display(),
-                    e
-                )
-            });
+            .status()?;
 
         if !status.success() {
-            panic!("ver-shim-build: objcopy failed with status {}", status);
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("llvm-objcopy failed with status {}", status),
+            ));
         }
+
+        Ok(())
     }
 
     /// Updates a section in a binary using llvm-objcopy, reading section data from bytes.
@@ -132,14 +131,15 @@ impl LlvmTools {
     /// This pipes the bytes directly to objcopy via stdin, avoiding the need for a
     /// temporary file. Works outside of build.rs context.
     ///
-    /// Panics on errors.
+    /// Returns `Ok(())` on success, or `Err` if there was an error executing
+    /// llvm-objcopy or if it exited with a non-zero status.
     pub fn update_section_with_bytes(
         &self,
         input: impl AsRef<Path>,
         output: impl AsRef<Path>,
         section_name: &str,
         bytes: &[u8],
-    ) {
+    ) -> io::Result<()> {
         let input = input.as_ref();
         let output = output.as_ref();
 
@@ -152,28 +152,25 @@ impl LlvmTools {
             .arg(input)
             .arg(output)
             .stdin(Stdio::piped())
-            .spawn()
-            .unwrap_or_else(|e| {
-                panic!(
-                    "ver-shim-build: failed to execute objcopy at '{}': {}",
-                    objcopy_path.display(),
-                    e
-                )
-            });
+            .spawn()?;
 
         // Write bytes to stdin and close the pipe
-        let mut stdin = child.stdin.take().expect("failed to open stdin");
-        stdin.write_all(bytes).unwrap_or_else(|e| {
-            panic!("ver-shim-build: failed to write to objcopy stdin: {}", e)
-        });
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "failed to open stdin"))?;
+        stdin.write_all(bytes)?;
         drop(stdin); // Close the pipe
 
-        let status = child.wait().unwrap_or_else(|e| {
-            panic!("ver-shim-build: failed to wait for objcopy: {}", e)
-        });
+        let status = child.wait()?;
 
         if !status.success() {
-            panic!("ver-shim-build: objcopy failed with status {}", status);
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("llvm-objcopy failed with status {}", status),
+            ));
         }
+
+        Ok(())
     }
 }

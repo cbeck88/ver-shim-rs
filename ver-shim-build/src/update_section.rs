@@ -107,7 +107,14 @@ impl UpdateSectionCommand {
                     &output_path,
                     SECTION_NAME,
                     &section_bytes,
-                );
+                )
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "ver-shim-build: failed to update section in {}: {}",
+                        self.bin_path.display(),
+                        e
+                    )
+                });
                 eprintln!(
                     "ver-shim-build: wrote patched binary to {}",
                     output_path.display()
