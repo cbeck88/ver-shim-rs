@@ -53,28 +53,19 @@
 //! }
 //! ```
 
+/// Cargo build script helper functions.
+mod cargo_helpers;
+
 /// Helper to find llvm objcopy, based on code in cargo-binutils.
-pub mod find_objcopy;
+mod find_objcopy;
 
 use chrono::{DateTime, FixedOffset, TimeZone, Utc};
-use heck::ToShoutySnakeCase;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use ver_shim::{BUFFER_SIZE, HEADER_SIZE, Member, NUM_MEMBERS, SECTION_NAME};
 
-/// Returns true if we're running inside a cargo build script context.
-/// We detect this by checking for the OUT_DIR environment variable.
-fn in_build_script() -> bool {
-    std::env::var_os("OUT_DIR").is_some()
-}
-
-/// Print a cargo directive, but only if we're in a build script context.
-fn cargo_directive(directive: &str) {
-    if in_build_script() {
-        println!("{}", directive);
-    }
-}
+use cargo_helpers::cargo_directive;
 
 /// Builder for configuring which git information to include in version sections.
 ///
@@ -213,7 +204,7 @@ impl LinkSection {
     ///
     /// Returns the path to the written file.
     pub fn write_to_out_dir(self) -> PathBuf {
-        let out_dir = get_out_dir();
+        let out_dir = cargo_helpers::out_dir();
         self.write_section_to_dir(&out_dir)
     }
 
@@ -237,7 +228,7 @@ impl LinkSection {
     /// CARGO_TARGET_DIR = { value = "target", relative = true }
     /// ```
     pub fn write_to_target_dir(self) -> PathBuf {
-        let target_dir = get_target();
+        let target_dir = cargo_helpers::target_dir();
         self.write_section_to_dir(&target_dir)
     }
 
@@ -437,10 +428,10 @@ impl UpdateSectionCommand {
     ///
     /// The binary is first written to `OUT_DIR`, then copied to the specified directory.
     pub fn write_to_dir(self, dir: impl AsRef<Path>) {
-        let out_dir = get_out_dir();
+        let out_dir = cargo_helpers::out_dir();
         let section_file = self.link_section.write_section_to_dir(&out_dir);
 
-        let bin_path = find_artifact_binary(&self.dep_name, &self.bin_name);
+        let bin_path = cargo_helpers::find_artifact_binary(&self.dep_name, &self.bin_name);
         eprintln!("ver-shim-build: artifact binary = {}", bin_path.display());
 
         // Emit rerun-if-changed for the artifact binary
@@ -483,65 +474,14 @@ impl UpdateSectionCommand {
     /// - <https://github.com/rust-lang/cargo/issues/9661#issuecomment-2159267601>
     /// - <https://github.com/rust-lang/cargo/issues/13663>
     pub fn write_to_target_profile_dir(self) {
-        let target_dir = get_target_profile_dir();
+        let target_dir = cargo_helpers::target_profile_dir();
         self.write_to_dir(target_dir);
     }
-}
-
-/// Gets the target profile directory (e.g., `target/debug/` or `target/release/`).
-///
-/// Derives this from OUT_DIR which is like `target/debug/build/<pkg>/out`.
-/// For cross-compilation, it's `target/<triple>/debug/build/<pkg>/out`.
-fn get_target_profile_dir() -> PathBuf {
-    let out_dir = get_out_dir();
-    // OUT_DIR is target/[<triple>/]debug/build/<pkg>/out, go up 3 levels to get target/[<triple>/]debug
-    out_dir
-        .ancestors()
-        .nth(3)
-        .expect("ver-shim-build: could not find target dir from OUT_DIR")
-        .to_path_buf()
 }
 
 // ============================================================================
 // Helper functions
 // ============================================================================
-
-/// Gets OUT_DIR from environment.
-fn get_out_dir() -> PathBuf {
-    // OUT_DIR is set by Cargo for build scripts to write generated files.
-    // See: https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts
-    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set - must be run from build.rs");
-    PathBuf::from(out_dir)
-}
-
-/// Gets the target directory (e.g., `target/`).
-///
-/// Checks CARGO_TARGET_DIR first, then tries to infer it from the value of
-/// OUT_DIR. If this inference fails, users can set CARGO_TARGET_DIR in
-/// `.cargo/config.toml`:
-/// ```toml
-/// [env]
-/// CARGO_TARGET_DIR = { value = "target", relative = true }
-/// ```
-fn get_target() -> PathBuf {
-    // Check CARGO_TARGET_DIR first (user override)
-    if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
-        return PathBuf::from(target_dir);
-    }
-
-    // Infer from OUT_DIR (target/debug/build/<pkg>/out -> go up 4 levels)
-    let out_dir = get_out_dir();
-    out_dir
-        .ancestors()
-        .nth(4)
-        .expect(
-            "ver-shim-build: could not find target dir from OUT_DIR. \
-             Set CARGO_TARGET_DIR in .cargo/config.toml:\n\n\
-             [env]\n\
-             CARGO_TARGET_DIR = { value = \"target\", relative = true }",
-        )
-        .to_path_buf()
-}
 
 /// Emits cargo rerun-if-changed directives for git state files.
 /// This ensures the build script reruns when the git HEAD or refs change.
@@ -727,82 +667,6 @@ fn run_git_command(args: &[&str], fail_on_error: bool) -> Option<String> {
             }
         }
     }
-}
-
-/// Finds the artifact binary path using Cargo's environment variables.
-///
-/// Artifact dependencies expose binaries via environment variables like
-/// `CARGO_BIN_FILE_<DEP>_<NAME>` and `CARGO_BIN_DIR_<DEP>`.
-/// See: https://doc.rust-lang.org/cargo/reference/unstable.html#artifact-dependencies
-fn find_artifact_binary(dep_name: &str, bin_name: &str) -> PathBuf {
-    // Convert dep name to SHOUTY_SNAKE_CASE for env var lookup.
-    // Cargo converts dependency names to uppercase with dashes replaced by underscores.
-    let dep_upper = dep_name.to_shouty_snake_case();
-
-    // Try CARGO_BIN_FILE_<DEP>_<NAME> with original bin name case first
-    // (cargo uses original case for bin name, not upper case)
-    let file_env_var_original = format!("CARGO_BIN_FILE_{}_{}", dep_upper, bin_name);
-    if let Ok(path) = std::env::var(&file_env_var_original) {
-        let path = PathBuf::from(path);
-        if path.exists() {
-            return path;
-        }
-        panic!(
-            "ver-shim-build: {} is set to '{}' but file does not exist",
-            file_env_var_original,
-            path.display()
-        );
-    }
-
-    // Try CARGO_BIN_FILE_<DEP> (default binary, no name suffix)
-    let file_env_var_default = format!("CARGO_BIN_FILE_{}", dep_upper);
-    if let Ok(path) = std::env::var(&file_env_var_default) {
-        let path = PathBuf::from(path);
-        if path.exists() {
-            return path;
-        }
-        panic!(
-            "ver-shim-build: {} is set to '{}' but file does not exist",
-            file_env_var_default,
-            path.display()
-        );
-    }
-
-    // Try CARGO_BIN_DIR_<DEP> and search for the binary
-    let dir_env_var = format!("CARGO_BIN_DIR_{}", dep_upper);
-    if let Ok(dir) = std::env::var(&dir_env_var) {
-        let dir_path = PathBuf::from(&dir);
-        // The binary might have a hash suffix, so look for any file starting with the bin name
-        if let Ok(entries) = fs::read_dir(&dir_path) {
-            for entry in entries.flatten() {
-                let file_name = entry.file_name();
-                let file_name_str = file_name.to_string_lossy();
-                // Match bin_name with underscores (cargo converts - to _)
-                let bin_name_underscore = bin_name.replace('-', "_");
-                if file_name_str.starts_with(&bin_name_underscore) {
-                    return entry.path();
-                }
-            }
-        }
-        panic!(
-            "ver-shim-build: {} is set to '{}' but no binary matching '{}' found in that directory",
-            dir_env_var, dir, bin_name
-        );
-    }
-
-    // No env var found
-    panic!(
-        "ver-shim-build: could not find artifact binary for dep='{}', bin='{}'\n\
-         Expected one of:\n\
-         - {} (not set)\n\
-         - {} (not set)\n\
-         - {} (not set)\n\
-         \n\
-         Make sure you have an artifact dependency in Cargo.toml:\n\
-         [build-dependencies]\n\
-         {} = {{ path = \"...\", artifact = \"bin\" }}",
-        dep_name, bin_name, file_env_var_original, file_env_var_default, dir_env_var, dep_name
-    );
 }
 
 /// Runs objcopy to update the section in the binary.
