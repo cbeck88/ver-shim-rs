@@ -49,8 +49,8 @@ struct Args {
     #[conf(long)]
     custom: Option<String>,
 
-    /// Output directory (writes ver_shim_data file to this directory)
-    #[conf(short, long, default_value = "target")]
+    /// Output path (writes to this path, or {path}/ver_shim_data if it's a directory)
+    #[conf(short, long)]
     output: PathBuf,
 }
 
@@ -101,10 +101,7 @@ fn main() {
     }
 
     // Write to output
-    section.write_to(&args.output);
+    let output_path = section.write_to(&args.output);
 
-    eprintln!(
-        "ver-shim-gen: wrote {}",
-        args.output.join("ver_shim_data").display()
-    );
+    eprintln!("ver-shim-gen: wrote {}", output_path.display());
 }

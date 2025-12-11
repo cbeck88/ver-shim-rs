@@ -193,24 +193,27 @@ impl LinkSection {
         self
     }
 
-    /// Writes the section data file to the specified directory.
+    /// Writes the section data file to the specified path.
+    ///
+    /// If the path is a directory, writes to `{path}/ver_shim_data`.
+    /// Otherwise writes directly to the path.
     ///
     /// This is useful for `cargo objcopy` workflows where you want to manually
     /// run objcopy with the generated section file.
     ///
     /// Returns the path to the written file.
-    pub fn write_to(self, dir: impl AsRef<Path>) -> PathBuf {
-        self.write_section_to_dir(dir.as_ref())
+    pub fn write_to(self, path: impl AsRef<Path>) -> PathBuf {
+        self.write_section_to_path(path.as_ref())
     }
 
-    /// Writes the section data file to `OUT_DIR`.
+    /// Writes the section data file to `OUT_DIR/ver_shim_data`.
     ///
     /// This is a convenience method for use in build scripts.
     ///
     /// Returns the path to the written file.
     pub fn write_to_out_dir(self) -> PathBuf {
         let out_dir = cargo_helpers::out_dir();
-        self.write_section_to_dir(&out_dir)
+        self.write_section_to_path(&out_dir)
     }
 
     /// Writes the section data file to the `target/` directory.
@@ -234,7 +237,7 @@ impl LinkSection {
     /// ```
     pub fn write_to_target_dir(self) -> PathBuf {
         let target_dir = cargo_helpers::target_dir();
-        self.write_section_to_dir(&target_dir)
+        self.write_section_to_path(&target_dir)
     }
 
     /// Transitions to an `UpdateSectionCommand` for patching an artifact dependency binary.
@@ -275,7 +278,7 @@ impl LinkSection {
         }
     }
 
-    fn write_section_to_dir(&self, dir: &Path) -> PathBuf {
+    pub(crate) fn write_section_to_path(&self, path: &Path) -> PathBuf {
         self.check_enabled();
 
         // Emit rerun-if-changed directives for git state (only if git data requested)
@@ -353,11 +356,15 @@ impl LinkSection {
         // Build the section buffer
         let buffer = build_section_buffer(&member_data);
 
-        // Write to file
-        let section_file = dir.join("ver_shim_data");
-        fs::write(&section_file, &buffer).expect("ver-shim-build: failed to write section file");
+        // Write to file - if path is a directory, append ver_shim_data
+        let output_path = if path.is_dir() {
+            path.join("ver_shim_data")
+        } else {
+            path.to_path_buf()
+        };
+        fs::write(&output_path, &buffer).expect("ver-shim-build: failed to write section file");
 
-        section_file
+        output_path
     }
 }
 

@@ -37,7 +37,7 @@ impl UpdateSectionCommand {
     /// binary is copied without modification.
     pub fn write_to_dir(self, dir: impl AsRef<Path>) {
         let out_dir = cargo_helpers::out_dir();
-        let section_file = self.link_section.write_section_to_dir(&out_dir);
+        let section_file = self.link_section.write_section_to_path(&out_dir);
 
         let bin_path = cargo_helpers::find_artifact_binary(&self.dep_name, &self.bin_name);
         eprintln!("ver-shim-build: artifact binary = {}", bin_path.display());
