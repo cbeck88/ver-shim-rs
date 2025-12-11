@@ -4,15 +4,20 @@
 //! injected into the binary via the `.ver_shim_data` link section.
 //!
 //! The section format is:
-//! - First `NUM_MEMBERS * 2` bytes: array of end offsets (u16, little-endian, relative to HEADER_SIZE)
+//! - First byte: number of members in the section (for forward compatibility)
+//! - Next `num_members * 2` bytes: array of end offsets (u16, little-endian, relative to header)
 //! - Remaining bytes: concatenated string data
 //!
+//! Header size = 1 + num_members * 2
+//!
 //! For member N:
-//! - start = HEADER_SIZE + end[N-1] if N > 0, else HEADER_SIZE
-//! - end = HEADER_SIZE + end[N]
+//! - start = header_size + end[N-1] if N > 0, else header_size
+//! - end = header_size + end[N]
 //! - If start == end, the member is not present.
+//! - If N >= num_members (from first byte), the member is not present.
 //!
 //! Using relative offsets means a zero-initialized buffer reads as "all members absent".
+//! The num_members byte enables forward compatibility: old sections can be read by new code.
 
 #![no_std]
 
@@ -28,22 +33,21 @@ pub const BUFFER_SIZE: usize = match option_env!("VER_SHIM_BUFFER_SIZE") {
     None => 512,
 };
 
-// Number of members in the version data.
+// Calculate header size for a given number of members.
+// Header = 1 byte (num_members) + 2 bytes per member (end offsets).
 #[doc(hidden)]
-pub const NUM_MEMBERS: usize = 9;
-
-// Size of the header (end offset for each member, 2 bytes each).
-#[doc(hidden)]
-pub const HEADER_SIZE: usize = NUM_MEMBERS * 2;
+pub const fn header_size(num_members: usize) -> usize {
+    1 + num_members * 2
+}
 
 // Compile-time checks for buffer size validity.
 // We use 32 as a minimum threshold because:
-// - The header must fit (currently 18 bytes for 9 members)
+// - The header must fit (currently 19 bytes for 9 members)
 // - There must be room for actual data
 // - Anything smaller than 32 bytes is impractical
 const _: () = assert!(
-    HEADER_SIZE <= 32,
-    "HEADER_SIZE exceeds 32, these asserts must be updated"
+    header_size(Member::COUNT) <= 32,
+    "header_size(Member::COUNT) exceeds 32, these asserts must be updated"
 );
 const _: () = assert!(
     BUFFER_SIZE > 32,
@@ -68,6 +72,12 @@ pub enum Member {
     BuildTimestamp = 6,
     BuildDate = 7,
     Custom = 8,
+}
+
+impl Member {
+    /// Number of members in the version data.
+    #[doc(hidden)]
+    pub const COUNT: usize = 9;
 }
 
 /// Static buffer for version data, placed in a custom link section.
@@ -98,7 +108,7 @@ fn read_buffer_u16(offset: usize) -> u16 {
 // Reads a member from the version buffer.
 //
 // Returns:
-// - `None` if the member is not present (start == end)
+// - `None` if the member is not present (start == end, or member >= actual num_members)
 // - `Some(&str)` containing the member's string data
 //
 // Panics:
@@ -109,16 +119,32 @@ fn read_buffer_u16(offset: usize) -> u16 {
 pub fn get_member(member: Member) -> Option<&'static str> {
     let idx = member as usize;
 
-    // Read end offset for this member (stored relative to HEADER_SIZE)
-    let end_offset_pos = idx * 2;
-    let end = HEADER_SIZE + read_buffer_u16(end_offset_pos) as usize;
+    // Read the actual number of members from the first byte
+    let actual_num_members = read_buffer_byte(0) as usize;
 
-    // Calculate start: HEADER_SIZE + previous member's end, or HEADER_SIZE for member 0
+    // If first byte is 0, section is uninitialized (all zeros)
+    if actual_num_members == 0 {
+        return None;
+    }
+
+    // Forward compatibility: if requested member >= actual num_members, return None
+    if idx >= actual_num_members {
+        return None;
+    }
+
+    // Compute header size based on actual number of members in the section
+    let actual_header_size = header_size(actual_num_members);
+
+    // Read end offset for this member (stored at byte 1 + idx * 2, relative to header)
+    let end_offset_pos = 1 + idx * 2;
+    let end = actual_header_size + read_buffer_u16(end_offset_pos) as usize;
+
+    // Calculate start: header_size + previous member's end, or header_size for member 0
     let start = if idx == 0 {
-        HEADER_SIZE
+        actual_header_size
     } else {
-        let prev_end_pos = (idx - 1) * 2;
-        HEADER_SIZE + read_buffer_u16(prev_end_pos) as usize
+        let prev_end_pos = 1 + (idx - 1) * 2;
+        actual_header_size + read_buffer_u16(prev_end_pos) as usize
     };
 
     // If start == end, member is not present

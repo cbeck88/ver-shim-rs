@@ -71,7 +71,7 @@ use chrono::{DateTime, FixedOffset, TimeZone, Utc};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use ver_shim::{BUFFER_SIZE, HEADER_SIZE, Member, NUM_MEMBERS};
+use ver_shim::{BUFFER_SIZE, Member, header_size};
 
 use cargo_helpers::{cargo_rerun_if, cargo_warning};
 
@@ -232,7 +232,7 @@ impl LinkSection {
         }
 
         // Collect the data for each member
-        let mut member_data: [Option<String>; NUM_MEMBERS] = Default::default();
+        let mut member_data: [Option<String>; Member::COUNT] = Default::default();
 
         if self.include_git_sha
             && let Some(git_sha) = get_git_sha(self.fail_on_error)
@@ -417,25 +417,33 @@ impl LinkSection {
 /// Builds the section buffer from member data.
 ///
 /// Format:
-/// - First `NUM_MEMBERS * 2` bytes: header with end offsets (u16, little-endian, relative to HEADER_SIZE)
+/// - First byte: number of members (Member::COUNT) for forward compatibility
+/// - Next `Member::COUNT * 2` bytes: header with end offsets (u16, little-endian, relative to header)
 /// - Remaining bytes: concatenated string data
 ///
+/// Header size = 1 + Member::COUNT * 2
+///
 /// For member N:
-/// - start = HEADER_SIZE + end[N-1] if N > 0, else HEADER_SIZE
-/// - end = HEADER_SIZE + end[N]
+/// - start = header_size + end[N-1] if N > 0, else header_size
+/// - end = header_size + end[N]
 /// - If start == end, the member is not present.
 ///
 /// Using relative offsets means a zero-initialized buffer reads as "all members absent".
-fn build_section_buffer(member_data: &[Option<String>; NUM_MEMBERS], buffer_size: usize) -> Vec<u8> {
+/// The num_members byte enables forward compatibility: old sections can be read by new code.
+fn build_section_buffer(member_data: &[Option<String>; Member::COUNT], buffer_size: usize) -> Vec<u8> {
     let mut buffer = vec![0u8; buffer_size];
+    let header_sz = header_size(Member::COUNT);
 
-    // Data starts after the header; track position relative to HEADER_SIZE
+    // First byte: number of members
+    buffer[0] = Member::COUNT as u8;
+
+    // Data starts after the header; track position relative to header_size
     let mut relative_offset: usize = 0;
 
     for (idx, data) in member_data.iter().enumerate() {
         if let Some(s) = data {
             let bytes = s.as_bytes();
-            let absolute_start = HEADER_SIZE + relative_offset;
+            let absolute_start = header_sz + relative_offset;
             let absolute_end = absolute_start + bytes.len();
 
             if absolute_end > buffer_size {
@@ -452,9 +460,10 @@ fn build_section_buffer(member_data: &[Option<String>; NUM_MEMBERS], buffer_size
             relative_offset += bytes.len();
         }
 
-        // Write the end offset for this member (relative to HEADER_SIZE)
+        // Write the end offset for this member (relative to header_size)
         // If member is not present, end == previous end, so start == end indicates "not present"
-        let header_offset = idx * 2;
+        // Offset positions start at byte 1 (after the num_members byte)
+        let header_offset = 1 + idx * 2;
         buffer[header_offset..header_offset + 2]
             .copy_from_slice(&(relative_offset as u16).to_le_bytes());
     }
