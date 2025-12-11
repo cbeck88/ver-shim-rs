@@ -3,6 +3,14 @@
 `ver-shim` is a library for injecting build-time information (git hashes, timestamps, etc.)
 into the binary *without* injecting code, or triggering frequent cargo rebuilds.
 
+[![Crates.io](https://img.shields.io/crates/v/ver-shim?style=flat-square)](https://crates.io/crates/ver-shim)
+[![Crates.io](https://img.shields.io/crates/d/ver-shim?style=flat-square)](https://crates.io/crates/ver-shim)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE-APACHE)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE-MIT)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/cbeck88/ver-shim-rs/ci.yml?branch=master&style=flat-square)](https://github.com/cbeck88/ver-shim-rs/actions/workflows/ci.yml?query=branch%3Amaster)
+
+[API Docs](https://docs.rs/ver-shim/latest/ver_shim/)
+
 This is particularly helpful if:
 
 * You have multiple binaries in your workspace and rebuilding them all is slow
