@@ -34,6 +34,7 @@ jobs:
       run: |
         cargo install cargo-binutils
         rustup component add llvm-tools
+        rustup component add llvm-tools --toolchain nightly
     - name: Rust build caching
       uses: Swatinem/rust-cache@v2
       with:
