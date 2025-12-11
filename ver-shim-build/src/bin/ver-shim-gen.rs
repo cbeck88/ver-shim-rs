@@ -1,4 +1,4 @@
-use conf::Conf;
+use conf::{Conf, Subcommands};
 use std::path::PathBuf;
 use ver_shim_build::LinkSection;
 
@@ -49,14 +49,30 @@ struct Args {
     #[conf(long)]
     custom: Option<String>,
 
-    /// Output path (writes to this path, or {path}/ver_shim_data if it's a directory)
+    /// Output path (writes to this path, or {path}/ver_shim_data if it's a directory).
+    /// Mutually exclusive with subcommands.
     #[conf(short, long)]
-    output: PathBuf,
+    output: Option<PathBuf>,
+
+    #[conf(subcommands)]
+    command: Option<Command>,
 }
 
-fn main() {
-    let args = Args::parse();
+#[derive(Debug, Subcommands)]
+enum Command {
+    /// Patch version info into an existing binary
+    Patch {
+        /// Input binary to patch
+        #[conf(pos)]
+        input: PathBuf,
 
+        /// Output path (defaults to input's parent directory)
+        #[conf(short, long)]
+        output: Option<PathBuf>,
+    },
+}
+
+fn build_section(args: &Args) -> LinkSection {
     let mut section = LinkSection::new();
 
     // Git options
@@ -96,12 +112,49 @@ fn main() {
     }
 
     // Custom string
-    if let Some(custom) = args.custom {
+    if let Some(ref custom) = args.custom {
         section = section.with_custom(custom);
     }
 
-    // Write to output
-    let output_path = section.write_to(&args.output);
+    section
+}
 
-    eprintln!("ver-shim-gen: wrote {}", output_path.display());
+fn main() {
+    // Unset OUT_DIR to prevent LinkSection from trying to use build.rs paths
+    std::env::remove_var("OUT_DIR");
+
+    let args = Args::parse();
+
+    // Error if --output is specified with a subcommand
+    if args.output.is_some() && args.command.is_some() {
+        eprintln!(
+            "error: when using patch command, top-level --output flag is ignored; \
+             this is probably not what you intended"
+        );
+        std::process::exit(1);
+    }
+
+    let section = build_section(&args);
+
+    match args.command {
+        Some(Command::Patch { ref input, ref output }) => {
+            let output_path = output
+                .clone()
+                .unwrap_or_else(|| input.parent().unwrap().to_path_buf());
+            section.patch_into(input).write_to(&output_path);
+            eprintln!(
+                "ver-shim-gen: patched {} -> {}",
+                input.display(),
+                output_path.display()
+            );
+        }
+        None => {
+            let Some(output) = args.output else {
+                eprintln!("error: --output is required when not using a subcommand");
+                std::process::exit(1);
+            };
+            let output_path = section.write_to(&output);
+            eprintln!("ver-shim-gen: wrote {}", output_path.display());
+        }
+    }
 }
