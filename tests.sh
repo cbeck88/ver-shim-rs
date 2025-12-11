@@ -20,11 +20,9 @@ fail() {
     exit 1
 }
 
-# Clean up before tests
+# Clean up before tests (workspace shares target directory)
 echo "Cleaning up..."
 cargo clean 2>/dev/null || true
-(cd ver-shim-example-objcopy && cargo clean 2>/dev/null) || true
-(cd ver-shim-example-build && cargo clean 2>/dev/null) || true
 echo
 
 # Test 1: Build objcopy example (debug)
@@ -69,7 +67,6 @@ echo
 
 # Test 5: Build objcopy example (release)
 echo "--- Test: Build objcopy example (release) ---"
-(cd ver-shim-example-objcopy && cargo build --release 2>&1)
 (cd ver-shim-example-objcopy && \
     cargo objcopy --release --bin ver-shim-example-objcopy -- \
     --update-section .ver_shim_data=target/ver_shim_data \
@@ -94,8 +91,8 @@ fi
 echo
 
 # Test 7: VER_SHIM_BUFFER_SIZE=1024 should work and trigger rebuild
+# We already have a build from test 5 (release) - now build with different buffer size
 echo "--- Test: VER_SHIM_BUFFER_SIZE=1024 triggers rebuild ---"
-(cd ver-shim-example-objcopy && cargo clean 2>/dev/null) || true
 BUILD_OUTPUT=$(cd ver-shim-example-objcopy && VER_SHIM_BUFFER_SIZE=1024 cargo build 2>&1)
 if echo "$BUILD_OUTPUT" | grep -q "Compiling ver-shim"; then
     pass "VER_SHIM_BUFFER_SIZE=1024 triggers rebuild"
@@ -106,7 +103,6 @@ echo
 
 # Test 8: VER_SHIM_BUFFER_SIZE=65535 should work
 echo "--- Test: VER_SHIM_BUFFER_SIZE=65535 (max u16) works ---"
-(cd ver-shim-example-objcopy && cargo clean 2>/dev/null) || true
 if (cd ver-shim-example-objcopy && VER_SHIM_BUFFER_SIZE=65535 cargo build 2>&1); then
     pass "VER_SHIM_BUFFER_SIZE=65535 works"
 else
@@ -116,7 +112,6 @@ echo
 
 # Test 9: VER_SHIM_BUFFER_SIZE=65536 should fail
 echo "--- Test: VER_SHIM_BUFFER_SIZE=65536 (overflow) fails ---"
-(cd ver-shim-example-objcopy && cargo clean 2>/dev/null) || true
 if (cd ver-shim-example-objcopy && VER_SHIM_BUFFER_SIZE=65536 cargo build 2>&1); then
     fail "VER_SHIM_BUFFER_SIZE=65536 should fail"
 else
@@ -126,7 +121,6 @@ echo
 
 # Test 10: VER_SHIM_BUFFER_SIZE=32 (too small) should fail
 echo "--- Test: VER_SHIM_BUFFER_SIZE=32 (too small) fails ---"
-(cd ver-shim-example-objcopy && cargo clean 2>/dev/null) || true
 if (cd ver-shim-example-objcopy && VER_SHIM_BUFFER_SIZE=32 cargo build 2>&1); then
     fail "VER_SHIM_BUFFER_SIZE=32 should fail (must be > 32)"
 else
