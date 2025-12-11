@@ -1,6 +1,6 @@
 [package]
 name = "ver-shim-build"
-version = "0.1.0"
+version = "0.1.1"
 description = "Build script helper for injecting version data into binaries"
 readme = "README.md"
 authors.workspace = true
@@ -12,6 +12,6 @@ categories.workspace = true
 include.workspace = true
 
 [dependencies]
-ver-shim = { path = "../ver-shim", version = "0.1" }
+ver-shim = { path = "../ver-shim", version = "0.1.1" }
 heck = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["std", "now"] }
