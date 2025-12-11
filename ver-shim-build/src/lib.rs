@@ -26,23 +26,22 @@
 //! use ver_shim_build::LinkSection;
 //!
 //! fn main() {
-//!     // Include all git info and write to target/debug/my-bin.bin
+//!     // Patch an artifact dependency binary (uses CARGO_BIN_FILE_* env vars)
 //!     LinkSection::new()
 //!         .with_all_git()
-//!         .patch_into("my-dep", "my-bin")
+//!         .patch_into_bin_dep("my-dep", "my-bin")
 //!         .write_to_target_profile_dir();
 //!
-//!     // Or include only specific git info
+//!     // Or patch a binary at a specific path
 //!     LinkSection::new()
-//!         .with_git_describe()
-//!         .with_git_branch()
-//!         .patch_into("my-dep", "my-bin")
+//!         .with_all_git()
+//!         .patch_into("/path/to/binary")
 //!         .write_to_target_profile_dir();
 //!
 //!     // Or with a custom output name
 //!     LinkSection::new()
 //!         .with_all_git()
-//!         .patch_into("my-dep", "my-bin")
+//!         .patch_into_bin_dep("my-dep", "my-bin")
 //!         .with_new_name("my-custom-name")
 //!         .write_to_target_profile_dir();
 //!
@@ -240,18 +239,30 @@ impl LinkSection {
         self.write_section_to_path(&target_dir)
     }
 
+    /// Transitions to an `UpdateSectionCommand` for patching a binary at the given path.
+    ///
+    /// # Arguments
+    /// * `binary_path` - Path to the binary to patch
+    pub fn patch_into(self, binary_path: impl AsRef<Path>) -> UpdateSectionCommand {
+        UpdateSectionCommand {
+            link_section: self,
+            bin_path: binary_path.as_ref().to_path_buf(),
+            new_name: None,
+        }
+    }
+
     /// Transitions to an `UpdateSectionCommand` for patching an artifact dependency binary.
+    ///
+    /// This is a convenience method for use with Cargo's artifact dependencies feature.
+    /// It finds the binary using the `CARGO_BIN_FILE_<DEP>_<NAME>` environment variables
+    /// that Cargo sets for artifact dependencies.
     ///
     /// # Arguments
     /// * `dep_name` - The name of the dependency as specified in Cargo.toml
     /// * `bin_name` - The name of the binary within the dependency
-    pub fn patch_into(self, dep_name: &str, bin_name: &str) -> UpdateSectionCommand {
-        UpdateSectionCommand {
-            link_section: self,
-            dep_name: dep_name.to_string(),
-            bin_name: bin_name.to_string(),
-            new_name: None,
-        }
+    pub fn patch_into_bin_dep(self, dep_name: &str, bin_name: &str) -> UpdateSectionCommand {
+        let bin_path = cargo_helpers::find_artifact_binary(dep_name, bin_name);
+        self.patch_into(bin_path)
     }
 
     fn any_git_enabled(&self) -> bool {

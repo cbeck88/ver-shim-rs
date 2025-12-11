@@ -2,7 +2,7 @@
 
 use std::env::consts::EXE_SUFFIX;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use ver_shim::{BUFFER_SIZE, SECTION_NAME};
@@ -11,21 +11,20 @@ use crate::cargo_helpers::{self, cargo_rerun_if, cargo_warning};
 use crate::rustc;
 use crate::LinkSection;
 
-/// Builder for updating sections in an artifact dependency binary.
+/// Builder for updating sections in a binary.
 ///
-/// Created by calling `LinkSection::patch_into()`.
+/// Created by calling `LinkSection::patch_into()` or `LinkSection::patch_into_bin_dep()`.
 #[must_use]
 pub struct UpdateSectionCommand {
     pub(crate) link_section: LinkSection,
-    pub(crate) dep_name: String,
-    pub(crate) bin_name: String,
+    pub(crate) bin_path: PathBuf,
     pub(crate) new_name: Option<String>,
 }
 
 impl UpdateSectionCommand {
     /// Sets a custom filename for the output binary.
     ///
-    /// If not called, the default name is `{bin_name}.bin`.
+    /// If not called, the default name is `{original_name}.bin`.
     pub fn with_new_name(mut self, name: &str) -> Self {
         self.new_name = Some(name.to_string());
         self
@@ -39,29 +38,33 @@ impl UpdateSectionCommand {
         let out_dir = cargo_helpers::out_dir();
         let section_file = self.link_section.write_section_to_path(&out_dir);
 
-        let bin_path = cargo_helpers::find_artifact_binary(&self.dep_name, &self.bin_name);
-        eprintln!("ver-shim-build: artifact binary = {}", bin_path.display());
+        eprintln!("ver-shim-build: input binary = {}", self.bin_path.display());
 
-        // Emit rerun-if-changed for the artifact binary
+        // Emit rerun-if-changed for the input binary
         // See: https://doc.rust-lang.org/cargo/reference/build-scripts.html#rerun-if-changed
-        cargo_rerun_if(&format!("changed={}", bin_path.display()));
+        cargo_rerun_if(&format!("changed={}", self.bin_path.display()));
 
-        // Determine output filename (default to {bin_name}.bin to avoid collisions with cargo)
-        let default_name = format!("{}.bin", self.bin_name);
+        // Determine output filename (default to {original_name}.bin to avoid collisions with cargo)
+        let original_name = self
+            .bin_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
+        let default_name = format!("{}.bin", original_name);
         let output_name = self.new_name.as_deref().unwrap_or(&default_name);
         let output_path = dir.as_ref().join(output_name);
 
-        if run_objcopy(&bin_path, &output_path, SECTION_NAME, &section_file) {
+        if run_objcopy(&self.bin_path, &output_path, SECTION_NAME, &section_file) {
             eprintln!(
                 "ver-shim-build: wrote patched binary to {}",
                 output_path.display()
             );
         } else {
             // Section doesn't exist, copy binary without modification
-            fs::copy(&bin_path, &output_path).unwrap_or_else(|e| {
+            fs::copy(&self.bin_path, &output_path).unwrap_or_else(|e| {
                 panic!(
                     "ver-shim-build: failed to copy {} to {}: {}",
-                    bin_path.display(),
+                    self.bin_path.display(),
                     output_path.display(),
                     e
                 )
