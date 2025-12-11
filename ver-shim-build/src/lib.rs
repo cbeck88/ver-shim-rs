@@ -92,6 +92,7 @@ pub struct LinkSection {
     include_build_date: bool,
     fail_on_error: bool,
     custom: Option<String>,
+    buffer_size: Option<usize>,
 }
 
 impl LinkSection {
@@ -193,6 +194,28 @@ impl LinkSection {
     pub fn with_custom(mut self, s: impl Into<String>) -> Self {
         self.custom = Some(s.into());
         self
+    }
+
+    /// Sets the buffer size for the section data.
+    ///
+    /// This should match the buffer size used when building the target binary.
+    /// If not set, falls back to:
+    /// 1. `VER_SHIM_BUFFER_SIZE` environment variable (at runtime)
+    /// 2. The `BUFFER_SIZE` constant from ver-shim (default 512)
+    pub fn with_buffer_size(mut self, size: usize) -> Self {
+        self.buffer_size = Some(size);
+        self
+    }
+
+    /// Gets the effective buffer size to use.
+    fn effective_buffer_size(&self) -> usize {
+        self.buffer_size
+            .or_else(|| {
+                std::env::var("VER_SHIM_BUFFER_SIZE")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+            })
+            .unwrap_or(BUFFER_SIZE)
     }
 
     /// Writes the section data file to the specified path.
@@ -368,7 +391,8 @@ impl LinkSection {
         }
 
         // Build the section buffer
-        let buffer = build_section_buffer(&member_data);
+        let buffer_size = self.effective_buffer_size();
+        let buffer = build_section_buffer(&member_data, buffer_size);
 
         // Write to file - if path is a directory, append ver_shim_data
         let output_path = if path.is_dir() {
@@ -394,8 +418,8 @@ impl LinkSection {
 /// - If start == end, the member is not present.
 ///
 /// Using relative offsets means a zero-initialized buffer reads as "all members absent".
-fn build_section_buffer(member_data: &[Option<String>; NUM_MEMBERS]) -> Vec<u8> {
-    let mut buffer = vec![0u8; BUFFER_SIZE];
+fn build_section_buffer(member_data: &[Option<String>; NUM_MEMBERS], buffer_size: usize) -> Vec<u8> {
+    let mut buffer = vec![0u8; buffer_size];
 
     // Data starts after the header; track position relative to HEADER_SIZE
     let mut relative_offset: usize = 0;
@@ -406,11 +430,11 @@ fn build_section_buffer(member_data: &[Option<String>; NUM_MEMBERS]) -> Vec<u8> 
             let absolute_start = HEADER_SIZE + relative_offset;
             let absolute_end = absolute_start + bytes.len();
 
-            if absolute_end > BUFFER_SIZE {
+            if absolute_end > buffer_size {
                 panic!(
                     "ver-shim-build: section data too large ({} bytes, max {}). \
-                     Set VER_SHIM_BUFFER_SIZE env var to increase the buffer size.",
-                    absolute_end, BUFFER_SIZE
+                     Use with_buffer_size() or set VER_SHIM_BUFFER_SIZE env var to increase.",
+                    absolute_end, buffer_size
                 );
             }
 
