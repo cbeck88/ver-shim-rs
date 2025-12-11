@@ -1,7 +1,7 @@
 //! LLVM tools wrapper for section manipulation.
 
 use std::env::consts::EXE_SUFFIX;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -24,29 +24,26 @@ impl LlvmTools {
 
     /// Gets the size of a section in a binary.
     ///
-    /// Returns `Some(size)` if the section exists, `None` if it doesn't.
-    /// Panics on errors (e.g., llvm-readobj fails to execute or parse).
-    pub fn get_section_size(&self, bin: impl AsRef<Path>, section_name: &str) -> Option<usize> {
+    /// Returns `Ok(Some(size))` if the section exists, `Ok(None)` if it doesn't,
+    /// or `Err` if there was an error executing llvm-readobj or parsing the output.
+    pub fn get_section_size(
+        &self,
+        bin: impl AsRef<Path>,
+        section_name: &str,
+    ) -> io::Result<Option<usize>> {
         let bin = bin.as_ref();
         let readobj_path = self.bin_dir.join(format!("llvm-readobj{}", EXE_SUFFIX));
 
         let output = Command::new(&readobj_path)
             .arg("--sections")
             .arg(bin)
-            .output()
-            .unwrap_or_else(|e| {
-                panic!(
-                    "ver-shim-build: failed to execute llvm-readobj at '{}': {}",
-                    readobj_path.display(),
-                    e
-                )
-            });
+            .output()?;
 
         if !output.status.success() {
-            panic!(
-                "ver-shim-build: llvm-readobj failed with status {}",
-                output.status
-            );
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("llvm-readobj failed with status {}", output.status),
+            ));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -81,18 +78,17 @@ impl LlvmTools {
             if in_target_section
                 && let Some(size_str) = trimmed.strip_prefix("Size:")
             {
-                let size = size_str.trim().parse::<usize>().unwrap_or_else(|e| {
-                    panic!(
-                        "ver-shim-build: failed to parse section size '{}': {}",
-                        size_str.trim(),
-                        e
+                let size = size_str.trim().parse::<usize>().map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("failed to parse section size '{}': {}", size_str.trim(), e),
                     )
-                });
-                return Some(size);
+                })?;
+                return Ok(Some(size));
             }
         }
 
-        None
+        Ok(None)
     }
 
     /// Updates a section in a binary using llvm-objcopy.

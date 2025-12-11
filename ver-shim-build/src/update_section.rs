@@ -84,7 +84,17 @@ impl UpdateSectionCommand {
         });
 
         // Get section size from the binary
-        match llvm.get_section_size(&self.bin_path, SECTION_NAME) {
+        let section_size = llvm
+            .get_section_size(&self.bin_path, SECTION_NAME)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "ver-shim-build: failed to read section info from {}: {}",
+                    self.bin_path.display(),
+                    e
+                )
+            });
+
+        match section_size {
             Some(size) => {
                 // Build section data with the correct buffer size from the binary
                 let section_bytes = self
