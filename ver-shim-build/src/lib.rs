@@ -55,6 +55,9 @@
 /// Cargo build script helper functions.
 mod cargo_helpers;
 
+/// LLVM tools wrapper for section manipulation.
+mod llvm_tools;
+
 /// Helper to find LLVM tools, based on code in cargo-binutils.
 mod rustc;
 

@@ -1,15 +1,12 @@
 //! Update section command for patching artifact dependency binaries.
 
-use std::env::consts::EXE_SUFFIX;
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use ver_shim::{BUFFER_SIZE, SECTION_NAME};
 
 use crate::LinkSection;
 use crate::cargo_helpers::{self, cargo_rerun_if, cargo_warning};
-use crate::rustc;
+use crate::llvm_tools::LlvmTools;
 
 /// Builder for updating sections in a binary.
 ///
@@ -80,21 +77,31 @@ impl UpdateSectionCommand {
             path.to_path_buf()
         };
 
-        if run_objcopy(&self.bin_path, &output_path, SECTION_NAME, &section_file) {
+        let llvm = LlvmTools::new().unwrap_or_else(|e| {
+            panic!(
+                "ver-shim-build: could not find LLVM tools directory: {}\n\
+                 Please install llvm-tools: rustup component add llvm-tools",
+                e
+            )
+        });
+
+        // Check section size before updating
+        if let Some(size) = llvm.get_section_size(&self.bin_path, SECTION_NAME) {
+            if size != BUFFER_SIZE {
+                cargo_warning(&format!(
+                    "section '{}' has size {} but expected {}, \
+                     binary may have been built with different ver-shim version",
+                    SECTION_NAME, size, BUFFER_SIZE
+                ));
+            }
+        }
+
+        if llvm.update_section_or_copy(&self.bin_path, &output_path, SECTION_NAME, &section_file) {
             eprintln!(
                 "ver-shim-build: wrote patched binary to {}",
                 output_path.display()
             );
         } else {
-            // Section doesn't exist, copy binary without modification
-            fs::copy(&self.bin_path, &output_path).unwrap_or_else(|e| {
-                panic!(
-                    "ver-shim-build: failed to copy {} to {}: {}",
-                    self.bin_path.display(),
-                    output_path.display(),
-                    e
-                )
-            });
             eprintln!("ver-shim-build: copied to {}", output_path.display());
         }
     }
@@ -113,132 +120,4 @@ impl UpdateSectionCommand {
         let target_dir = cargo_helpers::target_profile_dir();
         self.write_to(target_dir);
     }
-}
-
-/// Runs objcopy to update the section in the binary.
-///
-/// Returns `true` if the section was updated, `false` if the section doesn't exist.
-fn run_objcopy(input: &Path, output: &Path, section_name: &str, section_file: &Path) -> bool {
-    let bin_dir = rustc::llvm_tools_bin_dir().unwrap_or_else(|e| {
-        panic!(
-            "ver-shim-build: could not find LLVM tools directory: {}\n\
-             Please install llvm-tools: rustup component add llvm-tools",
-            e
-        )
-    });
-
-    let readobj_path = bin_dir.join(format!("llvm-readobj{}", EXE_SUFFIX));
-    let objcopy_path = bin_dir.join(format!("llvm-objcopy{}", EXE_SUFFIX));
-
-    // Check if the section exists and get its size
-    match get_section_info(input, section_name, &readobj_path) {
-        None => {
-            cargo_warning(&format!(
-                "section '{}' not found in {}, skipping",
-                section_name,
-                input.display()
-            ));
-            return false;
-        }
-        Some(size) => {
-            if size != BUFFER_SIZE {
-                cargo_warning(&format!(
-                    "section '{}' has size {} but expected {}, \
-                     binary may have been built with different ver-shim version",
-                    section_name, size, BUFFER_SIZE
-                ));
-            }
-        }
-    }
-
-    let update_arg = format!("{}={}", section_name, section_file.display());
-
-    let status = Command::new(&objcopy_path)
-        .arg("--update-section")
-        .arg(&update_arg)
-        .arg(input)
-        .arg(output)
-        .status()
-        .unwrap_or_else(|e| {
-            panic!(
-                "ver-shim-build: failed to execute objcopy at '{}': {}",
-                objcopy_path.display(),
-                e
-            )
-        });
-
-    if !status.success() {
-        panic!("ver-shim-build: objcopy failed with status {}", status);
-    }
-
-    true
-}
-
-/// Uses llvm-readobj to check if a section exists and get its size.
-///
-/// Returns `Some(size)` if the section exists, `None` if it doesn't.
-fn get_section_info(binary: &Path, section_name: &str, readobj_path: &Path) -> Option<usize> {
-    let output = Command::new(readobj_path)
-        .arg("--sections")
-        .arg(binary)
-        .output()
-        .unwrap_or_else(|e| {
-            panic!(
-                "ver-shim-build: failed to execute llvm-readobj at '{}': {}",
-                readobj_path.display(),
-                e
-            )
-        });
-
-    if !output.status.success() {
-        panic!(
-            "ver-shim-build: llvm-readobj failed with status {}",
-            output.status
-        );
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    // Parse llvm-readobj --sections output to find our section
-    // Format is like:
-    //   Section {
-    //     Index: 16
-    //     Name: .ver_shim_data (472)
-    //     Type: SHT_PROGBITS (0x1)
-    //     ...
-    //     Size: 512
-    //     ...
-    //   }
-    let mut in_target_section = false;
-    for line in stdout.lines() {
-        let trimmed = line.trim();
-
-        // Check if we're entering our target section
-        // Format: "Name: .ver_shim_data (472)"
-        if let Some(name_part) = trimmed.strip_prefix("Name:") {
-            // Remove parenthesized suffix and trim: ".ver_shim_data (472)" -> ".ver_shim_data"
-            let name = match name_part.find('(') {
-                Some(idx) => name_part[..idx].trim(),
-                None => name_part.trim(),
-            };
-            in_target_section = name == section_name;
-            continue;
-        }
-
-        // If we're in the target section, look for the Size line
-        if in_target_section
-            && let Some(size_str) = trimmed.strip_prefix("Size:")
-        {
-            let size = size_str.trim().parse::<usize>().unwrap_or_else(|e| {
-                panic!(
-                    "ver-shim-build: failed to parse section size '{}': {}",
-                    size_str.trim(),
-                    e
-                )
-            });
-            return Some(size);
-        }
-    }
-
-    None
 }
