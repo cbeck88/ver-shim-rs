@@ -2,7 +2,18 @@ use conf::{Conf, Subcommands};
 use std::path::PathBuf;
 use ver_shim_build::LinkSection;
 
-/// Generate ver-shim data file for use with objcopy.
+/// Inject git and build metadata into binaries via the .ver_shim_data linker section.
+///
+/// Two modes of operation:
+///
+/// 1. Generate section data file (for use with cargo objcopy):
+///      ver-shim --all-git -o target/ver_shim_data
+///
+/// 2. Patch a binary directly (recommended):
+///      ver-shim --all-git --build-timestamp patch target/release/my-bin
+///
+/// The patch command produces a new binary with .bin extension containing the version info.
+/// Use VER_SHIM_BUILD_TIME env var to override build timestamp for reproducible builds.
 #[derive(Debug, Conf)]
 struct Args {
     /// Include git SHA (git rev-parse HEAD)
@@ -60,13 +71,22 @@ struct Args {
 
 #[derive(Debug, Subcommands)]
 enum Command {
-    /// Patch version info into an existing binary
+    /// Patch version info into an existing binary using llvm-objcopy.
+    ///
+    /// Example: ver-shim --all-git patch target/release/my-bin
+    ///
+    /// This reads the input binary, updates its .ver_shim_data section with
+    /// the requested version info, and writes the result to {input}.bin
+    /// (or to the specified output path).
+    ///
+    /// Requires llvm-tools: rustup component add llvm-tools
     Patch {
-        /// Input binary to patch
+        /// Path to the binary to patch (e.g., target/release/my-bin)
         #[conf(pos)]
         input: PathBuf,
 
-        /// Output path (defaults to input's parent directory)
+        /// Output directory or file path. If a directory, writes {input_name}.bin there.
+        /// Defaults to the input file's parent directory.
         #[conf(short, long)]
         output: Option<PathBuf>,
     },
