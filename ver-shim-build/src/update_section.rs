@@ -24,17 +24,29 @@ pub struct UpdateSectionCommand {
 impl UpdateSectionCommand {
     /// Sets a custom filename for the output binary.
     ///
+    /// This can only be used when:
+    /// - The argument to `write_to()` is a directory, or
+    /// - Using `write_to_target_profile_dir()`
+    ///
+    /// If `write_to()` is called with a file path (not a directory), this will panic.
+    ///
     /// If not called, the default name is `{original_name}.bin`.
     pub fn with_new_name(mut self, name: &str) -> Self {
         self.new_name = Some(name.to_string());
         self
     }
 
-    /// Writes the patched binary to the specified directory.
+    /// Writes the patched binary to the specified path.
+    ///
+    /// If the path is a directory, the output filename will be determined by
+    /// `with_new_name()` if set, otherwise defaults to `{original_name}.bin`.
+    ///
+    /// If the path is not a directory, writes directly to that path. In this case,
+    /// `with_new_name()` must not have been called (will panic if it was).
     ///
     /// If the section doesn't exist in the input binary, a warning is logged and the
     /// binary is copied without modification.
-    pub fn write_to_dir(self, dir: impl AsRef<Path>) {
+    pub fn write_to(self, path: impl AsRef<Path>) {
         let out_dir = cargo_helpers::out_dir();
         let section_file = self.link_section.write_section_to_path(&out_dir);
 
@@ -44,15 +56,29 @@ impl UpdateSectionCommand {
         // See: https://doc.rust-lang.org/cargo/reference/build-scripts.html#rerun-if-changed
         cargo_rerun_if(&format!("changed={}", self.bin_path.display()));
 
-        // Determine output filename (default to {original_name}.bin to avoid collisions with cargo)
-        let original_name = self
-            .bin_path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("output");
-        let default_name = format!("{}.bin", original_name);
-        let output_name = self.new_name.as_deref().unwrap_or(&default_name);
-        let output_path = dir.as_ref().join(output_name);
+        // Determine output path
+        let path = path.as_ref();
+        let output_path = if path.is_dir() {
+            // Directory: use new_name if set, otherwise default to {original_name}.bin
+            let original_name = self
+                .bin_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("output");
+            let default_name = format!("{}.bin", original_name);
+            let output_name = self.new_name.as_deref().unwrap_or(&default_name);
+            path.join(output_name)
+        } else {
+            // File path: write directly, but panic if with_new_name was used
+            if self.new_name.is_some() {
+                panic!(
+                    "ver-shim-build: with_new_name() cannot be used when write_to() \
+                     is called with a file path (not a directory): {}",
+                    path.display()
+                );
+            }
+            path.to_path_buf()
+        };
 
         if run_objcopy(&self.bin_path, &output_path, SECTION_NAME, &section_file) {
             eprintln!(
@@ -85,7 +111,7 @@ impl UpdateSectionCommand {
     /// - <https://github.com/rust-lang/cargo/issues/13663>
     pub fn write_to_target_profile_dir(self) {
         let target_dir = cargo_helpers::target_profile_dir();
-        self.write_to_dir(target_dir);
+        self.write_to(target_dir);
     }
 }
 
