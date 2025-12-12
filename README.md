@@ -1,5 +1,7 @@
 # ver-shim
 
+!!! Renamed to [ver-stub](https://github.com/cbeck88/ver-stub-rs), please use that version !!!
+
 `ver-shim` is a library for injecting build-time information (git hashes, timestamps, etc.)
 into the binary *without* injecting code, or triggering frequent cargo rebuilds.
 

@@ -1,7 +1,7 @@
 [package]
 name = "ver-shim"
-version = "0.2.0"
-description = "Runtime access to version data injected via link section"
+version = "0.2.1"
+description = "Deprecated: renamed to ver-stub"
 readme = "README.md"
 links = ".ver_shim_data"
 authors.workspace = true

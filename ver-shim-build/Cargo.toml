@@ -1,7 +1,7 @@
 [package]
 name = "ver-shim-build"
-version = "0.2.0"
-description = "Build script helper for injecting version data into binaries"
+version = "0.2.1"
+description = "Deprecated: renamed to ver-stub-build"
 readme = "README.md"
 authors.workspace = true
 repository.workspace = true
