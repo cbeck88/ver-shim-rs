@@ -99,7 +99,7 @@ cargo +nightly build   # builds target/debug/ver-shim-example and auto-patches t
 Install the `ver-shim` CLI tool:
 
 ```sh
-cargo install ver-shim-build --features cli
+cargo install ver-shim-tool
 rustup component add llvm-tools
 ```
 

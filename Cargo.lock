@@ -207,9 +207,16 @@ name = "ver-shim-build"
 version = "0.2.0"
 dependencies = [
  "chrono",
- "conf",
  "heck",
  "ver-shim",
+]
+
+[[package]]
+name = "ver-shim-tool"
+version = "0.2.0"
+dependencies = [
+ "conf",
+ "ver-shim-build",
 ]
 
 [[package]]

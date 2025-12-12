@@ -1,0 +1,19 @@
+[package]
+name = "ver-shim-tool"
+version = "0.2.0"
+description = "CLI tool for injecting version data into binaries"
+readme = "../README.md"
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "ver-shim"
+path = "src/main.rs"
+
+[dependencies]
+ver-shim-build = { path = "../ver-shim-build", version = "0.2.0" }
+conf = { version = "0.4.3", default-features = false }

@@ -32,7 +32,7 @@ echo
 
 # Build the ver-shim CLI tool first
 echo "--- Building ver-shim CLI tool ---"
-cargo build -p ver-shim-build --features cli 2>&1
+cargo build -p ver-shim-tool 2>&1
 VER_SHIM="$(pwd)/target/debug/ver-shim"
 echo
 

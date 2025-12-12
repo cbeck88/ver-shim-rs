@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "ver-shim",
     "ver-shim-build",
+    "ver-shim-tool",
 ]
 exclude = [
     "ver-shim-example",
