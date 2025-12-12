@@ -190,4 +190,70 @@ else
 fi
 echo
 
+# Test 14: Patching updates git info without rebuild
+echo "--- Test: Patching updates git info without rebuild ---"
+
+# Get current branch for later comparison
+ORIGINAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+# Clean build first, and preemptively delete test branch in case previous run failed
+git branch -D testtesttesttest 2>/dev/null || true
+(cd ver-shim-example-objcopy && cargo clean 2>/dev/null || true)
+(cd ver-shim-example-objcopy && cargo build 2>&1)
+$VER_SHIM --all-git patch ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy 2>&1
+OUTPUT=$(./ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy.bin 2>&1)
+# Use regex to match "git branch:" followed by whitespace and branch name
+if echo "$OUTPUT" | grep -qE "git branch:\s+$ORIGINAL_BRANCH"; then
+    pass "initial build shows branch '$ORIGINAL_BRANCH'"
+else
+    fail "initial build should show branch '$ORIGINAL_BRANCH', got: $OUTPUT"
+fi
+
+# Create and checkout a new branch
+git checkout -b testtesttesttest 2>&1
+
+# Build and patch again - should not recompile
+BUILD_OUTPUT=$(cd ver-shim-example-objcopy && cargo build 2>&1)
+echo "$BUILD_OUTPUT"
+if echo "$BUILD_OUTPUT" | grep -q "Compiling"; then
+    fail "switching branches should not trigger recompilation"
+else
+    pass "no recompilation after branch switch"
+fi
+
+$VER_SHIM --all-git patch ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy 2>&1
+OUTPUT=$(./ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy.bin 2>&1)
+if echo "$OUTPUT" | grep -qE "git branch:\s+testtesttesttest"; then
+    pass "patched binary shows new branch 'testtesttesttest'"
+else
+    fail "patched binary should show branch 'testtesttesttest', got: $OUTPUT"
+fi
+
+# Go back to previous HEAD using reflog syntax (puts us in detached HEAD state)
+git checkout HEAD@{1} 2>&1
+
+# Build and patch again - should not recompile
+BUILD_OUTPUT=$(cd ver-shim-example-objcopy && cargo build 2>&1)
+echo "$BUILD_OUTPUT"
+if echo "$BUILD_OUTPUT" | grep -q "Compiling"; then
+    fail "checkout via reflog should not trigger recompilation"
+else
+    pass "no recompilation after reflog checkout"
+fi
+
+$VER_SHIM --all-git patch ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy 2>&1
+OUTPUT=$(./ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy.bin 2>&1)
+# In detached HEAD state, git rev-parse --abbrev-ref HEAD returns "HEAD"
+if echo "$OUTPUT" | grep -qE "git branch:\s+HEAD"; then
+    pass "patched binary shows detached HEAD after reflog checkout"
+else
+    fail "patched binary should show 'HEAD' (detached), got: $OUTPUT"
+fi
+
+# Return to original branch and clean up test branch
+git checkout "$ORIGINAL_BRANCH" 2>&1
+git branch -D testtesttesttest 2>&1
+pass "test branch cleaned up"
+echo
+
 echo -e "${GREEN}=== All tests passed ===${NC}"
