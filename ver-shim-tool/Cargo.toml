@@ -2,7 +2,7 @@
 name = "ver-shim-tool"
 version = "0.2.0"
 description = "CLI tool for injecting version data into binaries"
-readme = "../README.md"
+readme = "README.md"
 authors.workspace = true
 repository.workspace = true
 license.workspace = true

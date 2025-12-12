@@ -1,6 +1,6 @@
 # ver-shim-build
 
-This is a companion crate to [`ver-shim`](https://crates.io/crates/ver-shim).
+Build script helper for [`ver-shim`](https://crates.io/crates/ver-shim).
 
 [![Crates.io](https://img.shields.io/crates/v/ver-shim-build?style=flat-square)](https://crates.io/crates/ver-shim-build)
 [![Crates.io](https://img.shields.io/crates/d/ver-shim-build?style=flat-square)](https://crates.io/crates/ver-shim-build)
@@ -9,11 +9,24 @@ This is a companion crate to [`ver-shim`](https://crates.io/crates/ver-shim).
 
 [API Docs](https://docs.rs/ver-shim-build/latest/ver_shim_build/)
 
-`ver-shim-build` is a utility for `build.rs` scripts to generate link section content
-matching what `ver-shim` expects at runtime. It can collect git information (SHA, branch,
-commit timestamp, etc.) and build timestamps, then either:
+This crate generates link section content matching what `ver-shim` expects at runtime.
+It collects git information (SHA, branch, commit timestamp, etc.) and build timestamps,
+then writes the data to a file or patches it directly into a binary.
 
-- Write the section data to a file (for use with `cargo objcopy`), or
-- Use `objcopy` directly to patch it into a binary (for artifact dependency workflows)
+## Example
 
-See the main [`ver-shim` documentation](https://github.com/cbeck88/ver-shim-rs) for full usage instructions.
+```rust
+// build.rs
+fn main() {
+    ver_shim_build::LinkSection::new()
+        .with_all_git()
+        .with_build_timestamp()
+        .write_to_out_dir();
+}
+```
+
+## See Also
+
+- [`ver-shim`](https://crates.io/crates/ver-shim) - Runtime library for reading version data
+- [`ver-shim-tool`](https://crates.io/crates/ver-shim-tool) - CLI tool (if you don't need build.rs integration)
+- [Main documentation](https://github.com/cbeck88/ver-shim-rs) - Full usage instructions and examples
