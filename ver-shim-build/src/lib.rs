@@ -278,18 +278,25 @@ impl LinkSection {
         }
 
         if self.any_build_time_enabled() {
-            // Emit rerun-if-env-changed for reproducible build time override
+            // Emit rerun-if-env-changed for reproducible build options
+            cargo_rerun_if("env-changed=VER_SHIM_IDEMPOTENT");
             cargo_rerun_if("env-changed=VER_SHIM_BUILD_TIME");
-            let build_time = get_build_time();
-            if self.include_build_timestamp {
-                let rfc3339 = build_time.to_rfc3339();
-                eprintln!("ver-shim-build: build timestamp = {}", rfc3339);
-                member_data[Member::BuildTimestamp as usize] = Some(rfc3339);
-            }
-            if self.include_build_date {
-                let date = build_time.date_naive().to_string();
-                eprintln!("ver-shim-build: build date = {}", date);
-                member_data[Member::BuildDate as usize] = Some(date);
+
+            // VER_SHIM_IDEMPOTENT takes precedence: if set, never include build time
+            if std::env::var("VER_SHIM_IDEMPOTENT").is_ok() {
+                eprintln!("ver-shim-build: VER_SHIM_IDEMPOTENT is set, skipping build timestamp/date");
+            } else {
+                let build_time = get_build_time();
+                if self.include_build_timestamp {
+                    let rfc3339 = build_time.to_rfc3339();
+                    eprintln!("ver-shim-build: build timestamp = {}", rfc3339);
+                    member_data[Member::BuildTimestamp as usize] = Some(rfc3339);
+                }
+                if self.include_build_date {
+                    let date = build_time.date_naive().to_string();
+                    eprintln!("ver-shim-build: build date = {}", date);
+                    member_data[Member::BuildDate as usize] = Some(date);
+                }
             }
         }
 

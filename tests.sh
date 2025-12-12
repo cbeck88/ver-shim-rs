@@ -190,7 +190,25 @@ else
 fi
 echo
 
-# Test 14: Patching updates git info without rebuild
+# Test 14: VER_SHIM_IDEMPOTENT skips build time
+echo "--- Test: VER_SHIM_IDEMPOTENT skips build time ---"
+VER_SHIM_IDEMPOTENT=1 $VER_SHIM --all-git --all-build-time patch \
+    ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy 2>&1
+OUTPUT=$(./ver-shim-example-objcopy/target/debug/ver-shim-example-objcopy.bin 2>&1)
+if echo "$OUTPUT" | grep -qE "build timestamp:\s+\(not set\)" && echo "$OUTPUT" | grep -qE "build date:\s+\(not set\)"; then
+    pass "VER_SHIM_IDEMPOTENT skips build timestamp and date"
+else
+    fail "VER_SHIM_IDEMPOTENT should skip build timestamp/date, got: $OUTPUT"
+fi
+# Verify git info is still included
+if echo "$OUTPUT" | grep -qE "git sha:\s+[0-9a-f]+"; then
+    pass "VER_SHIM_IDEMPOTENT still includes git info"
+else
+    fail "VER_SHIM_IDEMPOTENT should still include git info, got: $OUTPUT"
+fi
+echo
+
+# Test 15: Patching updates git info without rebuild
 echo "--- Test: Patching updates git info without rebuild ---"
 
 # Get current branch for later comparison

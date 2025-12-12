@@ -201,9 +201,16 @@ in the hopes that it would go undetected and allow them to compromise specific u
 This touches on things like `vergen` and `ver-shim` because injecting a build timestamp into the binary makes it not reproducible -- the current time
 will be different if you build again later, so the hashes won't match.
 
-`ver-shim` respects an env var `VER_SHIM_BUILD_TIME`, which can be set to a unix timestamp or an RFC3339 date time. If set, it uses this time as the build
-time rather than the actual current time. You can make setting this part of your release process and published the value used with each release, so that
-you can have build times in your binary (convenient) while still enabling outsiders to reproduce the build.
+`ver-shim` provides two environment variables for reproducible builds:
+
+* **`VER_SHIM_IDEMPOTENT`**: If set (to any value), build timestamp and build date are never included, even if requested.
+  The binary will report `None` for these fields. This is the simplest option for fully reproducible builds.
+
+* **`VER_SHIM_BUILD_TIME`**: Can be set to a unix timestamp or an RFC3339 datetime. If set, this fixed time is used
+  instead of the actual current time. You can publish the value used with each release, so that outsiders can reproduce the build
+  while still having build times in your binary.
+
+`VER_SHIM_IDEMPOTENT` takes precedence over `VER_SHIM_BUILD_TIME` if both are set.
 
 This is similar to `SOURCE_DATE_EPOCH` in `vergen`.
 However, one thing I like about the `ver-shim` approach is that it also helps with the task of debugging non-reproducible builds.

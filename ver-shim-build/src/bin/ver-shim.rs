@@ -13,7 +13,10 @@ use ver_shim_build::LinkSection;
 ///      ver-shim --all-git --build-timestamp patch target/release/my-bin
 ///
 /// The patch command produces a new binary with .bin extension containing the version info.
-/// Use VER_SHIM_BUILD_TIME env var to override build timestamp for reproducible builds.
+///
+/// For reproducible builds:
+/// - VER_SHIM_IDEMPOTENT: If set, build timestamp/date are never included (always None)
+/// - VER_SHIM_BUILD_TIME: Override build timestamp with a fixed value (unix or RFC 3339)
 #[derive(Debug, Conf)]
 struct Args {
     /// Include git SHA (git rev-parse HEAD)
