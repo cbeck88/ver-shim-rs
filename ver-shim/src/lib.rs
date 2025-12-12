@@ -17,7 +17,9 @@
 //! - If N >= num_members (from first byte), the member is not present.
 //!
 //! Using relative offsets means a zero-initialized buffer reads as "all members absent".
-//! The num_members byte enables forward compatibility: old sections can be read by new code.
+//! The num_members byte enables forward and backwards compatibility: old sections can be read by new code
+//! which has more members added in the future, and new sections can be read by old code as well,
+//! as long as we never change the index of any existing member.
 
 #![no_std]
 
@@ -45,6 +47,7 @@ pub const fn header_size(num_members: usize) -> usize {
 // - The header must fit (currently 19 bytes for 9 members)
 // - There must be room for actual data
 // - Anything smaller than 32 bytes is impractical
+// - We want to give clear error messages, so a simpler condition is better.
 const _: () = assert!(
     header_size(Member::COUNT) <= 32,
     "header_size(Member::COUNT) exceeds 32, these asserts must be updated"
@@ -115,8 +118,7 @@ fn read_buffer_u16(offset: usize) -> u16 {
 // - If end < start (invalid range)
 // - If end > BUFFER_SIZE (out of bounds)
 // - If the data is not valid UTF-8
-#[doc(hidden)]
-pub fn get_member(member: Member) -> Option<&'static str> {
+fn get_member(member: Member) -> Option<&'static str> {
     let idx = member as usize;
 
     // Read the actual number of members from the first byte
